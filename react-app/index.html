@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>JupyterLite</title>
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('./coi-serviceworker.js').then((reg) => {
+          if (reg.installing || reg.waiting) {
+            reg.installing?.addEventListener('statechange', (e) => {
+              if (e.target.state === 'activated') location.reload();
+            });
+            reg.waiting?.addEventListener('statechange', (e) => {
+              if (e.target.state === 'activated') location.reload();
+            });
+          }
+        });
+      }
+    </script>
+    <script>
+      document.addEventListener('keydown', function (e) {
+        if (
+          e.key === 'F12' ||
+          (e.ctrlKey && e.shiftKey && ['I', 'J', 'C', 'K'].includes(e.key.toUpperCase())) ||
+          (e.ctrlKey && e.key.toUpperCase() === 'U')
+        ) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }, true);
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

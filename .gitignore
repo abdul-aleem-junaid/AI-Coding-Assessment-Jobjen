@@ -114,3 +114,7 @@ dmypy.json
 # jupyterlite
 *.doit.db
 _output
+
+# react-app generated files
+react-app/public/lab/
+react-app/dist/

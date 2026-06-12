@@ -14,21 +14,38 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install the dependencies
-        run: |
-          python -m pip install -r requirements.txt
-      - name: Build the JupyterLite site
-        run: |
-          cp README.md content
-          jupyter lite build --contents content --output-dir dist
+
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Build JupyterLite into React public folder
+        run: jupyter lite build --output-dir react-app/public/lab
+
+      - name: Patch JupyterLite (disable download)
+        run: node scripts/patch-build.cjs
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install React dependencies
+        run: npm ci
+        working-directory: react-app
+
+      - name: Build React app
+        run: npm run build
+        working-directory: react-app
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./dist
+          path: ./react-app/dist
 
   deploy:
     needs: build
