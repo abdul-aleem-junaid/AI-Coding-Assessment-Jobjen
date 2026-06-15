@@ -24,13 +24,12 @@ jobs:
         run: python -m pip install -r requirements.txt
 
       - name: Build JupyterLite into React public folder
+        run: jupyter lite build --output-dir react-app/public/lab
+
+      - name: Verify JupyterLite build output
         run: |
-          jupyter lite build \
-            --output-dir react-app/public/lab \
-            --overrides overrides.json
-          # Seed the starter assessment notebook for candidates
-          mkdir -p react-app/public/lab/files
-          cp react-app/public/lab/files/assessment.ipynb react-app/public/lab/files/assessment.ipynb 2>/dev/null || true
+          test -f react-app/public/lab/lab/index.html || (echo "ERROR: lab/lab/index.html not found — JupyterLite build failed!" && exit 1)
+          echo "JupyterLite build OK"
 
       - name: Patch JupyterLite (lockdown CSS, keyboard guard, MutationObserver)
         run: node scripts/patch-build.cjs
