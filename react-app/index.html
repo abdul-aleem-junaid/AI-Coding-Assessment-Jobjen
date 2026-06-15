@@ -4,6 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Coding Assessment | Jobjen</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
     <script>
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('./coi-serviceworker.js').then((reg) => {
@@ -17,18 +20,6 @@
           }
         });
       }
-    </script>
-    <script>
-      document.addEventListener('keydown', function (e) {
-        if (
-          e.key === 'F12' ||
-          (e.ctrlKey && e.shiftKey && ['I', 'J', 'C', 'K'].includes(e.key.toUpperCase())) ||
-          (e.ctrlKey && e.key.toUpperCase() === 'U')
-        ) {
-          e.preventDefault();
-          e.stopPropagation();
-        }
-      }, true);
     </script>
   </head>
   <body>

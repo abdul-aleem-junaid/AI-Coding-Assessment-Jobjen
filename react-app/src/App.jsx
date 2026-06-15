@@ -1,101 +1,84 @@
 import { useState, useEffect, useRef } from 'react'
-import DisableDevtool from 'disable-devtool'
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
+import { registerDevToolsToast, setDevToolsGuardActive, isDevToolsTriggered } from './devtoolsGuard.js'
+import LandingPage from './components/LandingPage'
+import PreflightCheck from './components/PreflightCheck'
+import AssessmentView from './components/AssessmentView'
 import './App.css'
 
 function App() {
-  const [open, setOpen] = useState(false)
-  const [toast, setToast] = useState(false)
-  const [blurred, setBlurred] = useState(false)
-  const triggered = useRef(false)
+  const location = useLocation()
+  const isAssessment = location.pathname === '/assessment'
 
-  const iframeRef = useRef(null)
-
-  const handleIframeLoad = () => {
-    try {
-      const iframeWin = iframeRef.current?.contentWindow
-      if (!iframeWin) return
-      // When focus is inside the iframe, the IFRAME's window fires blur/focus —
-      // not the parent's. Proxy those events back to our blur state.
-      iframeWin.addEventListener('blur', () => {
-        setTimeout(() => {
-          if (!document.hasFocus()) setBlurred(true)
-        }, 0)
-      })
-      iframeWin.addEventListener('focus', () => setBlurred(false))
-    } catch (e) {}
-  }
-
-  const handleDevToolsOpen = () => {
-    if (triggered.current) return
-    triggered.current = true
-    setToast(true)
-    const iframe = document.querySelector('iframe')
-    if (iframe) iframe.src = 'about:blank'
-    setTimeout(() => {
-      window.location.href = 'https://www.google.com'
-    }, 1500)
-  }
+  const [toast, setToast] = useState(() => isDevToolsTriggered())
+  const streamRef = useRef(null)
+  const navigate = useNavigate()
 
   useEffect(() => {
-    // Expose so the iframe can call back into the parent
-    window.__onDevToolsOpen = handleDevToolsOpen
-
-    DisableDevtool({ onDevToolOpen: handleDevToolsOpen })
-
-    return () => { delete window.__onDevToolsOpen }
+    return () => { streamRef.current?.getTracks().forEach(t => t.stop()) }
   }, [])
 
   useEffect(() => {
-    const onBlur = () => {
-      setTimeout(() => {
-        // document.hasFocus() returns true when focus is anywhere in the
-        // document (including inside an iframe) — only false when the user
-        // has actually left the tab/window entirely.
-        if (document.hasFocus()) return
-        setBlurred(true)
-      }, 0)
-    }
-    const onFocus = () => setBlurred(false)
-    const onVisibility = () => setBlurred(document.hidden)
+    registerDevToolsToast(() => setToast(true))
+    return () => registerDevToolsToast(null)
+  }, [])
 
-    window.addEventListener('blur', onBlur)
-    window.addEventListener('focus', onFocus)
-    document.addEventListener('visibilitychange', onVisibility)
+  useEffect(() => {
+    setDevToolsGuardActive(isAssessment)
+  }, [isAssessment])
+
+  // Assessment only: block DevTools shortcuts and right-click (no redirect).
+  useEffect(() => {
+    if (!isAssessment) return
+
+    const onKeyDown = (e) => {
+      const isDevShortcut =
+        e.key === 'F12' ||
+        ((e.ctrlKey || e.metaKey) && e.shiftKey &&
+          ['I', 'J', 'C', 'K'].includes(e.key.toUpperCase()))
+      if (isDevShortcut) {
+        e.preventDefault()
+      }
+    }
+
+    const onContextMenu = (e) => e.preventDefault()
+
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('contextmenu', onContextMenu)
 
     return () => {
-      window.removeEventListener('blur', onBlur)
-      window.removeEventListener('focus', onFocus)
-      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('contextmenu', onContextMenu)
     }
-  }, [])
+  }, [isAssessment])
 
   return (
     <>
       {toast && (
-        <div className="toast">
+        <div className="fixed top-5 right-5 z-[99999] bg-red-800 text-white text-sm font-semibold px-[22px] py-[14px] rounded-xl shadow-[0_4px_16px_rgba(0,0,0,0.35)] animate-slide-in font-sans">
           Access Restricted: Developer tools are not allowed.
         </div>
       )}
 
-      {blurred && <div className="blur-overlay" />}
-
-      {open ? (
-        <div className="app">
-          <iframe
-            ref={iframeRef}
-            src="./lab/lab/index.html"
-            title="JupyterLite"
-            className="jupyter-frame"
-            onLoad={handleIframeLoad}
-          />
-        </div>
-      ) : (
-        <div className="landing">
-          <h1>Coding Assessment</h1>
-          <p>An interactive coding environment that runs entirely in your browser.</p>
-          <button onClick={() => setOpen(true)}>Start Assessment</button>
-        </div>
-      )}
+      <Routes>
+        <Route
+          path="/"
+          element={<LandingPage onStart={() => navigate('/preflight')} />}
+        />
+        <Route
+          path="/preflight"
+          element={<PreflightCheck streamRef={streamRef} onBegin={() => navigate('/assessment')} />}
+        />
+        <Route
+          path="/assessment"
+          element={
+            streamRef.current
+              ? <AssessmentView streamRef={streamRef} />
+              : <Navigate to="/preflight" replace />
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
     </>
   )
 }

@@ -1,89 +1,19 @@
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-.app {
-  width: 100vw;
-  height: 100vh;
-}
-
-.jupyter-frame {
-  width: 100%;
-  height: 100%;
-  border: none;
-  display: block;
-}
-
-.landing {
-  width: 100vw;
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  background: #fff;
-  font-family: system-ui, sans-serif;
-}
-
-.landing h1 {
-  font-size: 2.5rem;
-  font-weight: 700;
-  color: #1a1a1a;
-}
-
-.landing p {
-  font-size: 1rem;
-  color: #666;
-  max-width: 380px;
-  text-align: center;
-}
-
-.landing button {
-  margin-top: 8px;
-  padding: 12px 32px;
-  font-size: 1rem;
-  font-weight: 600;
-  color: #fff;
-  background: #f57c00;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.landing button:hover {
-  background: #e65100;
-}
-
-.toast {
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  background: #c62828;
-  color: #fff;
-  padding: 14px 22px;
-  border-radius: 8px;
-  font-family: system-ui, sans-serif;
-  font-size: 14px;
-  font-weight: 600;
-  z-index: 99999;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-  animation: slideIn 0.3s ease;
-}
+@import "tailwindcss";
 
 @keyframes slideIn {
   from { transform: translateX(110%); opacity: 0; }
   to   { transform: translateX(0);    opacity: 1; }
 }
 
-.blur-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 9998;
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  background: rgba(0, 0, 0, 0.25);
+@theme {
+  --animate-slide-in: slideIn 0.3s ease;
+  --color-jobjen-bg: var(--bg-dark);
+  --color-jobjen-panel: var(--bg-panel);
+  --color-jobjen-surface: var(--bg-surface);
+  --color-jobjen-text: var(--text-main);
+  --color-jobjen-muted: var(--text-muted);
+  --color-jobjen-subtle: var(--text-subtle);
+  --color-jobjen-accent: var(--accent-magenta);
+  --color-jobjen-border: var(--border-subtle);
+  --font-sans: var(--font-primary);
 }

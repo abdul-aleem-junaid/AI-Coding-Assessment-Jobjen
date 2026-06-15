@@ -1,0 +1,102 @@
+/* Keep :root variables in sync with react-app/src/theme.css */
+
+:root {
+  --bg-dark: #000000;
+  --bg-panel: #111111;
+  --bg-surface: #1a1a1a;
+  --text-main: #ffffff;
+  --text-muted: rgba(255, 255, 255, 0.7);
+  --text-subtle: rgba(255, 255, 255, 0.45);
+  --accent-magenta: #d000ff;
+  --accent-purple: #7000ff;
+  --border-subtle: rgba(255, 255, 255, 0.12);
+  --border-badge: rgba(255, 255, 255, 0.35);
+  --btn-gradient: linear-gradient(90deg, var(--accent-magenta), var(--accent-purple));
+  --font-primary: 'Inter', system-ui, sans-serif;
+}
+
+body {
+  --jp-layout-color0: var(--bg-dark);
+  --jp-layout-color1: var(--bg-panel);
+  --jp-layout-color2: var(--bg-surface);
+  --jp-layout-color3: #222222;
+  --jp-layout-color4: #2a2a2a;
+  --jp-inverse-layout-color0: var(--text-main);
+  --jp-inverse-layout-color1: var(--text-muted);
+  --jp-inverse-layout-color2: var(--text-subtle);
+  --jp-inverse-layout-color3: rgba(255, 255, 255, 0.25);
+  --jp-inverse-layout-color4: rgba(255, 255, 255, 0.15);
+  --jp-ui-font-color0: var(--text-main);
+  --jp-ui-font-color1: var(--text-muted);
+  --jp-ui-font-color2: var(--text-subtle);
+  --jp-ui-font-color3: rgba(255, 255, 255, 0.35);
+  --jp-content-font-color0: var(--text-main);
+  --jp-content-font-color1: var(--text-muted);
+  --jp-content-font-color2: var(--text-subtle);
+  --jp-content-font-color3: rgba(255, 255, 255, 0.35);
+  --jp-border-color0: var(--border-subtle);
+  --jp-border-color1: rgba(255, 255, 255, 0.18);
+  --jp-border-color2: rgba(255, 255, 255, 0.08);
+  --jp-border-color3: rgba(255, 255, 255, 0.05);
+  --jp-brand-color0: var(--accent-purple);
+  --jp-brand-color1: var(--accent-magenta);
+  --jp-brand-color2: #b800e6;
+  --jp-brand-color3: #9a00cc;
+  --jp-brand-color4: #7a00a3;
+  --jp-accent-color0: var(--accent-magenta);
+  --jp-accent-color1: var(--accent-purple);
+  --jp-accent-color2: #5c00cc;
+  --jp-accent-color3: #440099;
+  --jp-warn-color0: #ff6b6b;
+  --jp-warn-color1: #ff8787;
+  --jp-warn-color2: #ffa8a8;
+  --jp-error-color0: #ff5252;
+  --jp-error-color1: #ff6b6b;
+  --jp-error-color2: #ff8787;
+  --jp-success-color0: var(--accent-magenta);
+  --jp-success-color1: var(--accent-purple);
+  --jp-success-color2: #5c00cc;
+  --jp-info-color0: var(--accent-magenta);
+  --jp-info-color1: var(--accent-purple);
+  --jp-info-color2: #5c00cc;
+  --jp-cell-editor-background: var(--bg-surface);
+  --jp-cell-editor-border-color: var(--border-subtle);
+  --jp-input-background: var(--bg-panel);
+  --jp-input-active-background: var(--bg-surface);
+  --jp-input-hover-background: var(--bg-surface);
+  --jp-input-active-border-color: var(--accent-magenta);
+  --jp-input-active-box-shadow-color: rgba(208, 0, 255, 0.25);
+  --jp-toolbar-background: var(--bg-panel);
+  --jp-toolbar-box-shadow: none;
+  --jp-toolbar-border-color: var(--border-subtle);
+  --jp-toolbar-active-background: var(--bg-surface);
+  --jp-toolbar-header-margin: 4px;
+  --jp-ui-font-family: var(--font-primary);
+  --jp-content-font-family: var(--font-primary);
+  --jp-code-font-family: 'Consolas', 'Monaco', monospace;
+}
+
+#jp-main-dock-panel {
+  background: var(--bg-dark);
+}
+
+.lm-TabBar-tab.lm-mod-current {
+  border-bottom-color: var(--accent-magenta) !important;
+}
+
+.lm-TabBar-tab:hover {
+  background: var(--bg-surface) !important;
+}
+
+.jp-ToolbarButtonComponent.jp-mod-accept {
+  background: var(--btn-gradient) !important;
+  color: var(--text-main) !important;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(208, 0, 255, 0.35);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(208, 0, 255, 0.55);
+}
