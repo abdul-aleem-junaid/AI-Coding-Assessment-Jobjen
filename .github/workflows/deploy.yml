@@ -24,9 +24,15 @@ jobs:
         run: python -m pip install -r requirements.txt
 
       - name: Build JupyterLite into React public folder
-        run: jupyter lite build --output-dir react-app/public/lab
+        run: |
+          jupyter lite build \
+            --output-dir react-app/public/lab \
+            --overrides overrides.json
+          # Seed the starter assessment notebook for candidates
+          mkdir -p react-app/public/lab/files
+          cp react-app/public/lab/files/assessment.ipynb react-app/public/lab/files/assessment.ipynb 2>/dev/null || true
 
-      - name: Patch JupyterLite (disable download)
+      - name: Patch JupyterLite (lockdown CSS, keyboard guard, MutationObserver)
         run: node scripts/patch-build.cjs
 
       - name: Setup Node.js
