@@ -4,26 +4,80 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Coding Assessment | Jobjen</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <!--
+      Google Fonts: crossorigin is required so COEP (require-corp) does not
+      block the font stylesheet when the COI service worker is active.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap"
+      rel="stylesheet"
+      crossorigin
+    />
+
     <script>
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('./coi-serviceworker.js').then((reg) => {
-          if (reg.installing || reg.waiting) {
-            reg.installing?.addEventListener('statechange', (e) => {
-              if (e.target.state === 'activated') location.reload();
-            });
-            reg.waiting?.addEventListener('statechange', (e) => {
-              if (e.target.state === 'activated') location.reload();
-            });
-          }
-        });
-      }
+      /*
+       * COI Service Worker registration
+       * ─────────────────────────────────────────────────────────────────────
+       * Registers coi-serviceworker.js which injects COOP + COEP headers so
+       * SharedArrayBuffer (required by Pyodide) is available on GitHub Pages.
+       *
+       * The service worker must intercept the NAVIGATION REQUEST for this very
+       * page to add the headers to the response.  That means:
+       *   • First install  → SW activates → reload (SW now intercepts next load)
+       *   • Already active → page may still lack headers if SW missed navigation
+       *                      → reload ONCE (guarded by sessionStorage flag)
+       */
+      (function () {
+        if (!('serviceWorker' in navigator)) return;
+
+        // Guard: prevent an infinite reload loop in case something goes wrong.
+        var RELOAD_KEY = 'coi_reloaded';
+        var alreadyReloaded = sessionStorage.getItem(RELOAD_KEY);
+
+        function safeReload() {
+          if (alreadyReloaded) return;          // never reload more than once per session
+          sessionStorage.setItem(RELOAD_KEY, '1');
+          location.reload();
+        }
+
+        // Clear the flag on a successful isolated load so future sessions reload
+        // if the SW ever becomes inactive again.
+        if (window.crossOriginIsolated) {
+          sessionStorage.removeItem(RELOAD_KEY);
+        }
+
+        navigator.serviceWorker
+          .register('./coi-serviceworker.js')
+          .then(function (reg) {
+            if (window.crossOriginIsolated) return; // already isolated, nothing to do
+
+            if (reg.installing) {
+              // First-ever install: wait for activation then reload.
+              reg.installing.addEventListener('statechange', function (e) {
+                if (e.target.state === 'activated') safeReload();
+              });
+            } else if (reg.waiting) {
+              // Updated SW waiting to take over.
+              reg.waiting.addEventListener('statechange', function (e) {
+                if (e.target.state === 'activated') safeReload();
+              });
+            } else if (reg.active) {
+              // SW is active but this page navigation was NOT intercepted
+              // (e.g. hard refresh, browser restart, or first controlled load).
+              // Reload once so the SW can intercept the next navigation.
+              safeReload();
+            }
+          })
+          .catch(function (err) {
+            console.warn('[coi-sw] registration failed:', err);
+          });
+      })();
     </script>
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+    <script type="module" src="./src/main.jsx"></script>
   </body>
 </html>
