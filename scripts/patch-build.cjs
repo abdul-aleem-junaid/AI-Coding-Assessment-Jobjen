@@ -282,7 +282,6 @@ if (!html.includes("jobjen-jupyter-theme.css")) {
 
 /* Patch 2 — lockdown CSS block */
 if (!html.includes("JOBJEN ASSESSMENT LOCKDOWN")) {
-  // Insert the CSS just before </head>
   html = html.replace("</head>", `${LOCKDOWN_CSS}\n  </head>`);
   changed = true;
   console.log("[patch-build] ✓ Lockdown CSS injected");
@@ -307,6 +306,83 @@ if (!html.includes("ITEM_NAMES")) {
   html = html.replace("  </body>", `${LOCKDOWN_SCRIPT}\n  </body>`);
   changed = true;
   console.log("[patch-build] ✓ MutationObserver lockdown injected");
+}
+
+/*
+ * Patch 6 — Fix JupyterLite service worker URL
+ *
+ * The JupyterLite build generates lab/lab/index.html which references
+ * the service worker as "./sw.js" — this resolves to lab/lab/sw.js
+ * but the actual file is at lab/sw.js (one level up).
+ * Fix: replace "./sw.js" → "../sw.js" in the inline config script.
+ */
+if (!html.includes('"../sw.js"') && !html.includes("'../sw.js'")) {
+  const before = html;
+  // The SW URL appears inside the jupyter-config-data JSON
+  html = html.replace(/"serviceWorkerUrl"\s*:\s*"\.\/sw\.js"/g, '"serviceWorkerUrl": "../sw.js"');
+  html = html.replace(/'serviceWorkerUrl'\s*:\s*'\.\/'\+'sw\.js'/g, "'serviceWorkerUrl': '../sw.js'");
+  // Also catch bare ./sw.js in any attribute or script context
+  html = html.replace(/(["'])\.\/sw\.js\1/g, (m, q) => `${q}../sw.js${q}`);
+  if (html !== before) {
+    changed = true;
+    console.log("[patch-build] ✓ JupyterLite service worker URL patched (./sw.js → ../sw.js)");
+  } else {
+    console.log("[patch-build] ℹ Service worker URL not found (may already be correct or absent)");
+  }
+}
+
+/*
+ * Patch 7 — Remove crashing plugin overrides from jupyter-config-data
+ *
+ * Browser investigation confirmed: overrides for
+ *   @jupyterlab/filebrowser-extension:browser  (allowFileUploads, toolbar)
+ *   @jupyterlab/notebook-extension:tracker     (kernelShutdown)
+ * cause a TypeError crash on startup in JupyterLite 0.7.1 because those
+ * plugin schemas do not match.  The DOM lockdown already hides these UI
+ * elements at runtime, so these overrides are both redundant and harmful.
+ */
+const CRASH_KEYS = [
+  '@jupyterlab/filebrowser-extension:browser',
+  '@jupyterlab/notebook-extension:tracker',
+];
+
+try {
+  // The config data is embedded as JSON inside a <script id="jupyter-config-data"> tag.
+  // Use a regex that handles whitespace/newlines in the opening tag.
+  const configMatch = html.match(/<script[\s\S]*?id=["']jupyter-config-data["'][\s\S]*?>([\s\S]*?)<\/script>/);
+  if (configMatch) {
+    let config;
+    try {
+      config = JSON.parse(configMatch[1]);
+    } catch {
+      console.warn('[patch-build] ⚠ Could not parse jupyter-config-data JSON — skipping Patch 7');
+      config = null;
+    }
+    if (config) {
+      let configChanged = false;
+      if (config.settingsOverrides) {
+        CRASH_KEYS.forEach((key) => {
+          if (config.settingsOverrides[key]) {
+            delete config.settingsOverrides[key];
+            configChanged = true;
+            console.log(`[patch-build] ✓ Removed crashing override: ${key}`);
+          }
+        });
+      }
+      if (configChanged) {
+        const newJson = JSON.stringify(config, null, 2);
+        // Replace the original JSON inside the script tag (preserve opening/closing tags)
+        const fullTag = configMatch[0];
+        const newTag = fullTag.replace(configMatch[1], '\n' + newJson + '\n');
+        html = html.replace(fullTag, newTag);
+        changed = true;
+      }
+    }
+  } else {
+    console.log('[patch-build] ℹ jupyter-config-data script not found — skipping Patch 7');
+  }
+} catch (e) {
+  console.warn('[patch-build] ⚠ Patch 7 error (non-fatal):', e.message);
 }
 
 if (!changed) {

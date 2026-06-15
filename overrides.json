@@ -5,34 +5,18 @@
 
   "@jupyterlab/mainmenu-extension:plugin": {
     "menus": [
-      { "id": "jp-mainmenu-file", "disabled": true },
-      { "id": "jp-mainmenu-edit", "disabled": true },
-      { "id": "jp-mainmenu-view", "disabled": true },
-      { "id": "jp-mainmenu-run", "disabled": true },
-      { "id": "jp-mainmenu-kernel", "disabled": true },
-      { "id": "jp-mainmenu-tabs", "disabled": true },
+      { "id": "jp-mainmenu-file",     "disabled": true },
+      { "id": "jp-mainmenu-edit",     "disabled": true },
+      { "id": "jp-mainmenu-view",     "disabled": true },
+      { "id": "jp-mainmenu-run",      "disabled": true },
+      { "id": "jp-mainmenu-kernel",   "disabled": true },
+      { "id": "jp-mainmenu-tabs",     "disabled": true },
       { "id": "jp-mainmenu-settings", "disabled": true },
-      { "id": "jp-mainmenu-help", "disabled": true }
+      { "id": "jp-mainmenu-help",     "disabled": true }
     ]
   },
 
   "@jupyterlab/statusbar-extension:plugin": {
     "visible": false
-  },
-
-  "@jupyterlab/filebrowser-extension:browser": {
-    "allowFileUploads": false,
-    "toolbar": [
-      { "name": "new-file", "disabled": true },
-      { "name": "new-folder", "disabled": true },
-      { "name": "upload", "disabled": true },
-      { "name": "new-launcher", "disabled": true },
-      { "name": "file-new", "disabled": true },
-      { "name": "open", "disabled": true }
-    ]
-  },
-
-  "@jupyterlab/notebook-extension:tracker": {
-    "kernelShutdown": false
   }
 }
