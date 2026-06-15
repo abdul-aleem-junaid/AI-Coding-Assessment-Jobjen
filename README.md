@@ -1,37 +1,47 @@
-# JupyterLite Demo
+# AI Coding Assessment | Jobjen
 
-[![lite-badge](https://jupyterlite.rtfd.io/en/latest/_static/badge.svg)](https://jupyterlite.github.io/demo)
+An interactive, browser-based coding assessment platform built for Jobjen. Candidates write and run real Python/JavaScript code directly in the browser — no installs, no setup.
 
-JupyterLite deployed as a static site to GitHub Pages, for demo purposes.
+## Try it
 
-## ✨ Try it in your browser ✨
+**https://abdul-aleem-junaid.github.io/AI-Coding-Assessment-Jobjen/**
 
-➡️ **https://jupyterlite.github.io/demo**
+## Features
 
-![github-pages](https://user-images.githubusercontent.com/591645/120649478-18258400-c47d-11eb-80e5-185e52ff2702.gif)
+- **In-browser execution** — powered by [JupyterLite](https://jupyterlite.readthedocs.io/), runs entirely client-side via WebAssembly
+- **DevTools protection** — detects and blocks developer tools to maintain assessment integrity
+- **Tab-switch detection** — blurs the environment when the candidate leaves the tab
+- **No download** — file download is disabled inside the notebook
 
-## Requirements
+## Tech Stack
 
-JupyterLite is being tested against modern web browsers:
+| Layer | Technology |
+|---|---|
+| Frontend | React 18 + Vite |
+| Notebook engine | JupyterLite (Pyodide + JS kernels) |
+| Deployment | GitHub Pages via GitHub Actions |
 
+## Local Development
+
+```bash
+# Install Python dependencies & build JupyterLite
+pip install -r requirements.txt
+jupyter lite build --output-dir react-app/public/lab
+
+# Patch the build (disables download)
+node scripts/patch-build.cjs
+
+# Start the React dev server
+cd react-app
+npm install
+npm run dev
+```
+
+## Deployment
+
+Push to `main` — GitHub Actions builds JupyterLite, builds the React app, and deploys to GitHub Pages automatically.
+
+## Browser Requirements
+
+- Chrome / Edge 89+
 - Firefox 90+
-- Chromium 89+
-
-## Deploy your JupyterLite website on GitHub Pages
-
-Check out the guide on the JupyterLite documentation: https://jupyterlite.readthedocs.io/en/latest/quickstart/deploy.html
-
-## Further Information and Updates
-
-For more info, keep an eye on the JupyterLite documentation:
-
-- How-to Guides: https://jupyterlite.readthedocs.io/en/latest/howto/index.html
-- Reference: https://jupyterlite.readthedocs.io/en/latest/reference/index.html
-
-This template provides the Pyodide kernel (`jupyterlite-pyodide-kernel`), the JavaScript kernel (`jupyterlite-javascript-kernel`), and the p5 kernel (`jupyterlite-p5-kernel`), along with other
-optional utilities and extensions to make the JupyterLite experience more enjoyable. See the
-[`requirements.txt` file](requirements.txt) for a list of all the dependencies provided.
-
-For a template based on the Xeus kernel, see the [`jupyterlite/xeus-python-demo` repository](https://github.com/jupyterlite/xeus-python-demo)
-
-

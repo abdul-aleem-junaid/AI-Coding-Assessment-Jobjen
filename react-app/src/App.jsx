@@ -91,9 +91,9 @@ function App() {
         </div>
       ) : (
         <div className="landing">
-          <h1>JupyterLite</h1>
+          <h1>Coding Assessment</h1>
           <p>An interactive coding environment that runs entirely in your browser.</p>
-          <button onClick={() => setOpen(true)}>Open Editor</button>
+          <button onClick={() => setOpen(true)}>Start Assessment</button>
         </div>
       )}
     </>
