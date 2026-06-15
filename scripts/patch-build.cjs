@@ -10,19 +10,20 @@
  *   node scripts/patch-build.cjs
  */
 
-const fs   = require('fs');
-const path = require('path');
+const fs = require("fs");
+const path = require("path");
 
-const target = path.join(__dirname, '../react-app/public/lab/lab/index.html');
+const target = path.join(__dirname, "../react-app/public/lab/lab/index.html");
 
 if (!fs.existsSync(target)) {
-  console.error('[patch-build] ERROR — target not found:', target);
-  console.error('Run: jupyter lite build --output-dir react-app/public/lab');
+  console.error("[patch-build] ERROR — target not found:", target);
+  console.error("Run: jupyter lite build --output-dir react-app/public/lab");
   process.exit(1);
 }
 
 /* ── 1. Theme stylesheet link ───────────────────────────────────────────── */
-const THEME_LINK = '<link rel="stylesheet" href="../../jobjen-jupyter-theme.css" />';
+const THEME_LINK =
+  '<link rel="stylesheet" href="../../jobjen-jupyter-theme.css" />';
 
 /* ── 2. Inline lockdown CSS (exact selectors confirmed from live DOM) ───── */
 const LOCKDOWN_CSS = `
@@ -269,48 +270,48 @@ const LOCKDOWN_SCRIPT = `
     </script>`;
 
 /* ── Apply patches ───────────────────────────────────────────────────────── */
-let html = fs.readFileSync(target, 'utf8');
+let html = fs.readFileSync(target, "utf8");
 let changed = false;
 
 /* Patch 1 — theme stylesheet */
-if (!html.includes('jobjen-jupyter-theme.css')) {
-  html = html.replace('</head>', `    ${THEME_LINK}\n  </head>`);
+if (!html.includes("jobjen-jupyter-theme.css")) {
+  html = html.replace("</head>", `    ${THEME_LINK}\n  </head>`);
   changed = true;
-  console.log('[patch-build] ✓ Jobjen theme stylesheet linked');
+  console.log("[patch-build] ✓ Jobjen theme stylesheet linked");
 }
 
 /* Patch 2 — lockdown CSS block */
-if (!html.includes('JOBJEN ASSESSMENT LOCKDOWN')) {
+if (!html.includes("JOBJEN ASSESSMENT LOCKDOWN")) {
   // Insert the CSS just before </head>
-  html = html.replace('</head>', `${LOCKDOWN_CSS}\n  </head>`);
+  html = html.replace("</head>", `${LOCKDOWN_CSS}\n  </head>`);
   changed = true;
-  console.log('[patch-build] ✓ Lockdown CSS injected');
+  console.log("[patch-build] ✓ Lockdown CSS injected");
 }
 
 /* Patch 3 — DevTools detection */
-if (!html.includes('__onDevToolsOpen')) {
-  html = html.replace('  </body>', `${DEVTOOLS_SCRIPT}\n  </body>`);
+if (!html.includes("__onDevToolsOpen")) {
+  html = html.replace("  </body>", `${DEVTOOLS_SCRIPT}\n  </body>`);
   changed = true;
-  console.log('[patch-build] ✓ DevTools detection injected');
+  console.log("[patch-build] ✓ DevTools detection injected");
 }
 
 /* Patch 4 — Keyboard shortcut blocker */
-if (!html.includes('stopPropagation')) {
-  html = html.replace('  </body>', `${KEYBOARD_SCRIPT}\n  </body>`);
+if (!html.includes("stopPropagation")) {
+  html = html.replace("  </body>", `${KEYBOARD_SCRIPT}\n  </body>`);
   changed = true;
-  console.log('[patch-build] ✓ Keyboard shortcut blocker injected');
+  console.log("[patch-build] ✓ Keyboard shortcut blocker injected");
 }
 
 /* Patch 5 — Full MutationObserver lockdown */
-if (!html.includes('ITEM_NAMES')) {
-  html = html.replace('  </body>', `${LOCKDOWN_SCRIPT}\n  </body>`);
+if (!html.includes("ITEM_NAMES")) {
+  html = html.replace("  </body>", `${LOCKDOWN_SCRIPT}\n  </body>`);
   changed = true;
-  console.log('[patch-build] ✓ MutationObserver lockdown injected');
+  console.log("[patch-build] ✓ MutationObserver lockdown injected");
 }
 
 if (!changed) {
-  console.log('[patch-build] All patches already applied — nothing to do.');
+  console.log("[patch-build] All patches already applied — nothing to do.");
 }
 
-fs.writeFileSync(target, html, 'utf8');
-console.log('[patch-build] Done →', target);
+fs.writeFileSync(target, html, "utf8");
+console.log("[patch-build] Done →", target);
