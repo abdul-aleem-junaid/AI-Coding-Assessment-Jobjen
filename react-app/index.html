@@ -30,15 +30,15 @@
        *                      → reload ONCE (guarded by sessionStorage flag)
        */
       (function () {
-        if (!('serviceWorker' in navigator)) return;
+        if (!("serviceWorker" in navigator)) return;
 
         // Guard: prevent an infinite reload loop in case something goes wrong.
-        var RELOAD_KEY = 'coi_reloaded';
+        var RELOAD_KEY = "coi_reloaded";
         var alreadyReloaded = sessionStorage.getItem(RELOAD_KEY);
 
         function safeReload() {
-          if (alreadyReloaded) return;          // never reload more than once per session
-          sessionStorage.setItem(RELOAD_KEY, '1');
+          if (alreadyReloaded) return; // never reload more than once per session
+          sessionStorage.setItem(RELOAD_KEY, "1");
           location.reload();
         }
 
@@ -49,19 +49,19 @@
         }
 
         navigator.serviceWorker
-          .register('./coi-serviceworker.js')
+          .register("./coi-serviceworker.js")
           .then(function (reg) {
             if (window.crossOriginIsolated) return; // already isolated, nothing to do
 
             if (reg.installing) {
               // First-ever install: wait for activation then reload.
-              reg.installing.addEventListener('statechange', function (e) {
-                if (e.target.state === 'activated') safeReload();
+              reg.installing.addEventListener("statechange", function (e) {
+                if (e.target.state === "activated") safeReload();
               });
             } else if (reg.waiting) {
               // Updated SW waiting to take over.
-              reg.waiting.addEventListener('statechange', function (e) {
-                if (e.target.state === 'activated') safeReload();
+              reg.waiting.addEventListener("statechange", function (e) {
+                if (e.target.state === "activated") safeReload();
               });
             } else if (reg.active) {
               // SW is active but this page navigation was NOT intercepted
@@ -71,7 +71,7 @@
             }
           })
           .catch(function (err) {
-            console.warn('[coi-sw] registration failed:', err);
+            console.warn("[coi-sw] registration failed:", err);
           });
       })();
     </script>
