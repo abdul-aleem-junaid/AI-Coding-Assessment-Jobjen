@@ -100,3 +100,121 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(208, 0, 255, 0.55);
 }
+
+/* ============================================================
+   JOBJEN ASSESSMENT LOCKDOWN — hide restricted UI elements
+   ============================================================ */
+
+/* --- Menu bar (File, Edit, View, Run, Kernel, Tabs, Settings, Help) --- */
+#jp-MainMenu {
+  display: none !important;
+}
+
+/* --- File-browser toolbar: New Folder, Upload, New Launcher buttons --- */
+/* Target by aria-label / data-command */
+.jp-FileBrowser-toolbar .jp-ToolbarButtonComponent[data-command="filebrowser:create-new-directory"],
+.jp-FileBrowser-toolbar .jp-ToolbarButtonComponent[data-command="filebrowser:create-new-file"],
+.jp-FileBrowser-toolbar .jp-ToolbarButtonComponent[data-command="filebrowser:open-new-browser-tab"],
+.jp-FileBrowser-toolbar [data-command="filebrowser:upload"],
+.jp-FileBrowser-toolbar [title="New Folder"],
+.jp-FileBrowser-toolbar [title="Upload Files"],
+.jp-FileBrowser-toolbar [title="New Launcher"],
+.jp-FileBrowser-toolbar [title="New File"] {
+  display: none !important;
+}
+
+/* --- Left sidebar: Running Terminals & Kernels tab --- */
+#jp-left-stack ~ .lm-TabBar [data-id="jp-running-sessions"],
+.jp-SideBar .lm-TabBar-tab[data-id="jp-running-sessions"],
+.jp-SideBar [title="Running Terminals and Kernels"] {
+  display: none !important;
+}
+
+/* --- Left sidebar: Table of Contents tab --- */
+.jp-SideBar .lm-TabBar-tab[data-id="toc"],
+.jp-SideBar [title="Table of Contents"] {
+  display: none !important;
+}
+
+/* --- Main area: "+" New Launcher tab button (all possible selectors) --- */
+.lm-TabBar-addButton,
+.jp-DockPanel .lm-TabBar-addButton,
+#jp-main-dock-panel .lm-TabBar-addButton,
+[data-command="launcher:create"].lm-TabBar-addButton,
+[title="New Launcher"].lm-TabBar-tab {
+  display: none !important;
+}
+
+/* --- Status bar (entire footer strip) --- */
+#jp-main-statusbar,
+.jp-StatusBar-widget {
+  display: none !important;
+}
+
+/* --- Status bar switch / settings icon in bottom-right --- */
+.jp-StatusBar-item[id*="setting"],
+.jp-StatusBar-item[id*="switch"] {
+  display: none !important;
+}
+
+/* --- New Launcher page: hide section titles / launcher cards
+       (users go straight into the notebook, no launcher needed) --- */
+.jp-Launcher {
+  display: none !important;
+}
+
+/* --- Notebook toolbar: restricted icons when .ipynb is open ---
+     Hides:
+       • "↗" Open in New Browser Tab button
+       • Trust notebook checkmark (✓) button
+       • Kernel status circle / indicator in the toolbar
+       • "No Kernel" / kernel-name pill next to the tab title
+       • Share / screenshot buttons                                     */
+
+/* Open in New Browser Tab icon */
+.jp-NotebookPanel-toolbar [data-command="docmanager:open-browser-tab"],
+.jp-NotebookPanel-toolbar [title="Open in New Browser Tab"],
+.jp-NotebookPanel-toolbar [title*="new browser tab"],
+.jp-Toolbar [data-command="docmanager:open-browser-tab"] {
+  display: none !important;
+}
+
+/* Trust notebook button (checkmark) */
+.jp-NotebookPanel-toolbar [data-command="notebook:trust"],
+.jp-NotebookPanel-toolbar [title*="Trust"],
+.jp-NotebookPanel-toolbar [title*="trust"] {
+  display: none !important;
+}
+
+/* Kernel status / kernel-name indicator in the toolbar */
+.jp-NotebookPanel-toolbar .jp-KernelName,
+.jp-NotebookPanel-toolbar .jp-Toolbar-kernelName,
+.jp-NotebookPanel-toolbar [title*="Kernel"],
+.jp-NotebookPanel-toolbar .jp-ToolbarButton-label:empty + .jp-Toolbar-kernelStatus,
+.jp-Toolbar .jp-KernelStatus,
+.jp-Toolbar .jp-Toolbar-kernelStatus {
+  display: none !important;
+}
+
+/* Tab-bar kernel status dot / "No Kernel" text shown on the notebook tab */
+.lm-TabBar-tab .jp-mod-activity-title ~ span,
+.lm-TabBar-tab [title*="No Kernel"],
+.lm-TabBar-tab [title*="Kernel Status"] {
+  display: none !important;
+}
+
+/* Screenshot / camera icon (if any extension adds one) */
+.jp-NotebookPanel-toolbar [data-command*="screenshot"],
+.jp-NotebookPanel-toolbar [data-command*="capture"],
+.jp-NotebookPanel-toolbar [title*="Screenshot"],
+.jp-NotebookPanel-toolbar [title*="screenshot"] {
+  display: none !important;
+}
+
+/* "↗" external-link icon that appears BESIDE the notebook tab title */
+.lm-TabBar-tab .lm-TabBar-tabIcon[data-command="docmanager:open-browser-tab"],
+.lm-TabBar-tab a[title*="browser tab"],
+/* The small icons/badges rendered next to the notebook tab label */
+.lm-TabBar-tab .jp-mod-current .jp-NotebookIcon ~ span {
+  display: none !important;
+}

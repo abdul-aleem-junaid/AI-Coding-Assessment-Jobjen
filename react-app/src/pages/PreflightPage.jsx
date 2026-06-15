@@ -1,5 +1,12 @@
+// src/pages/PreflightPage.jsx
+//
+// Route: "/preflight"
+// Camera + microphone permission check and rules display before the assessment
+// begins. On success, calls onBegin() to navigate to /assessment.
+
 import { useState, useEffect, useRef } from 'react'
 
+// ── Constants ────────────────────────────────────────────────────────────────
 const RULES = [
   'Do not open DevTools, browser console, or use inspect element at any time.',
   'Do not switch tabs, open new windows, or leave this page during the assessment.',
@@ -10,6 +17,7 @@ const RULES = [
 
 const BAR_HEIGHTS = [10, 16, 22, 30, 26, 20, 14, 18, 28, 32, 24, 18, 12, 20, 28, 32, 24, 16, 10, 16]
 
+// ── Icons ────────────────────────────────────────────────────────────────────
 const CameraIcon = () => (
   <svg width="52" height="40" viewBox="0 0 52 40" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <rect x="2" y="10" width="48" height="28" rx="5" />
@@ -27,19 +35,23 @@ const MicIcon = () => (
   </svg>
 )
 
-export default function PreflightCheck({ streamRef, onBegin }) {
+// ── Component ────────────────────────────────────────────────────────────────
+export default function PreflightPage({ streamRef, onBegin }) {
   const [permission, setPermission] = useState('idle') // idle | requesting | granted | denied
-  const [micLevel, setMicLevel] = useState(0)
-  const preflightVideoRef = useRef(null)
-  const audioCtxRef = useRef(null)
-  const animFrameRef = useRef(null)
+  const [micLevel, setMicLevel]     = useState(0)
 
+  const preflightVideoRef = useRef(null)
+  const audioCtxRef       = useRef(null)
+  const animFrameRef      = useRef(null)
+
+  // Attach stream to video element once permission is granted
   useEffect(() => {
     if (permission === 'granted' && preflightVideoRef.current && streamRef.current) {
       preflightVideoRef.current.srcObject = streamRef.current
     }
   }, [permission])
 
+  // Cleanup AudioContext and animation frame on unmount
   useEffect(() => {
     return () => {
       cancelAnimationFrame(animFrameRef.current)
@@ -48,9 +60,9 @@ export default function PreflightCheck({ streamRef, onBegin }) {
   }, [])
 
   const startMicMeter = (stream) => {
-    const ctx = new AudioContext()
+    const ctx     = new AudioContext()
     audioCtxRef.current = ctx
-    const source = ctx.createMediaStreamSource(stream)
+    const source  = ctx.createMediaStreamSource(stream)
     const analyser = ctx.createAnalyser()
     analyser.fftSize = 256
     source.connect(analyser)
@@ -81,7 +93,7 @@ export default function PreflightCheck({ streamRef, onBegin }) {
   return (
     <div className="w-screen h-screen flex font-sans">
 
-      {/* Left: camera preview */}
+      {/* ── Left: camera preview ──────────────────────────────────────── */}
       <div className="w-[45%] bg-jobjen-panel flex flex-col p-7 gap-3.5">
         <p className="text-jobjen-subtle text-[0.7rem] font-semibold tracking-[0.1em] uppercase">
           Camera Preview
@@ -106,7 +118,7 @@ export default function PreflightCheck({ streamRef, onBegin }) {
         </div>
       </div>
 
-      {/* Right: rules + action */}
+      {/* ── Right: rules + action ─────────────────────────────────────── */}
       <div className="w-[55%] bg-jobjen-bg flex flex-col px-11 py-12 overflow-y-auto gap-7">
 
         <div className="flex flex-col gap-2.5">
@@ -130,6 +142,7 @@ export default function PreflightCheck({ streamRef, onBegin }) {
           ))}
         </ol>
 
+        {/* Microphone level meter */}
         {permission === 'granted' && (
           <div className="bg-jobjen-surface border border-jobjen-border rounded-xl p-4 flex flex-col gap-3">
             <div className="flex items-center gap-2.5 text-jobjen-muted">
@@ -156,6 +169,7 @@ export default function PreflightCheck({ streamRef, onBegin }) {
           </div>
         )}
 
+        {/* CTA buttons */}
         <div className="mt-auto pt-6 border-t border-jobjen-border">
           {permission === 'idle' && (
             <button onClick={requestPermissions} className="jobjen-btn-primary w-full py-3.5 px-8 text-base font-semibold rounded-xl">

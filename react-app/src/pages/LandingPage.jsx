@@ -1,3 +1,9 @@
+// src/pages/LandingPage.jsx
+//
+// Route: "/"
+// First screen the candidate sees. Shows the Jobjen brand and a CTA to
+// start the preflight check.
+
 export default function LandingPage({ onStart }) {
   return (
     <div className="jobjen-hero w-screen h-screen flex flex-col items-center justify-center gap-4 font-sans">

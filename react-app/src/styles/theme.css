@@ -1,0 +1,73 @@
+/* src/styles/theme.css
+ *
+ * Design tokens & component utility classes for the Jobjen assessment UI.
+ * Imported once by index.css — do not import directly from components.
+ */
+
+/* ── Design tokens ──────────────────────────────────────────────────────── */
+:root {
+  /* Backgrounds */
+  --bg-dark:    #000000;
+  --bg-panel:   #111111;
+  --bg-surface: #1a1a1a;
+
+  /* Typography */
+  --text-main:   #ffffff;
+  --text-muted:  rgba(255, 255, 255, 0.7);
+  --text-subtle: rgba(255, 255, 255, 0.45);
+
+  /* Brand accents */
+  --accent-magenta: #d000ff;
+  --accent-purple:  #7000ff;
+
+  /* Borders */
+  --border-subtle: rgba(255, 255, 255, 0.12);
+  --border-badge:  rgba(255, 255, 255, 0.35);
+
+  /* Gradients */
+  --btn-gradient:    linear-gradient(90deg, var(--accent-magenta), var(--accent-purple));
+  --gradient-glow:   radial-gradient(ellipse 90% 55% at 50% 100%, rgba(208, 0, 255, 0.4) 0%, rgba(112, 0, 255, 0.2) 45%, transparent 70%);
+
+  /* Radii */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+
+  /* Typography */
+  --font-primary: 'Inter', system-ui, sans-serif;
+}
+
+/* ── Utility component classes ──────────────────────────────────────────── */
+.jobjen-hero {
+  background-color: var(--bg-dark);
+  background-image: var(--gradient-glow);
+}
+
+.jobjen-badge {
+  border: 1px solid var(--border-badge);
+  background: rgba(0, 0, 0, 0.4);
+  color: var(--text-main);
+}
+
+.jobjen-btn-primary {
+  background: var(--btn-gradient);
+  color: var(--text-main);
+  border: none;
+  cursor: pointer;
+  transition: filter 0.2s ease, opacity 0.2s ease;
+}
+
+.jobjen-btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
+.jobjen-btn-primary:disabled             { opacity: 0.5; cursor: not-allowed; }
+
+.jobjen-btn-success {
+  background: var(--btn-gradient);
+  color: var(--text-main);
+  border: none;
+  cursor: pointer;
+  transition: filter 0.2s ease;
+}
+
+.jobjen-btn-success:hover:not(:disabled) { filter: brightness(1.1); }
+
+.jobjen-surface { background-color: var(--bg-surface); }
+.jobjen-panel   { background-color: var(--bg-panel); }

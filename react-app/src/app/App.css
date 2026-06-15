@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+/* ── Animations ─────────────────────────────────────────────────────────── */
+@keyframes slideIn {
+  from { transform: translateX(110%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+/* ── Tailwind theme tokens (maps CSS vars → Tailwind utility classes) ───── */
+@theme {
+  --animate-slide-in: slideIn 0.3s ease;
+
+  --color-jobjen-bg:      var(--bg-dark);
+  --color-jobjen-panel:   var(--bg-panel);
+  --color-jobjen-surface: var(--bg-surface);
+  --color-jobjen-text:    var(--text-main);
+  --color-jobjen-muted:   var(--text-muted);
+  --color-jobjen-subtle:  var(--text-subtle);
+  --color-jobjen-accent:  var(--accent-magenta);
+  --color-jobjen-border:  var(--border-subtle);
+
+  --font-sans: var(--font-primary);
+}

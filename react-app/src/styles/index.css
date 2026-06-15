@@ -1,3 +1,9 @@
+/* src/styles/index.css
+ *
+ * Global resets and base typography.
+ * Entry point for all stylesheets — imported once in main.jsx.
+ */
+
 @import './theme.css';
 
 html,
