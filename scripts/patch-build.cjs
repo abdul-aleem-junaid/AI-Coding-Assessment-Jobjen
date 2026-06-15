@@ -332,23 +332,20 @@ if (!html.includes('"../sw.js"') && !html.includes("'../sw.js'")) {
 }
 
 /*
- * Patch 7 — Remove crashing plugin overrides from jupyter-config-data
- *
- * Browser investigation confirmed: overrides for
- *   @jupyterlab/filebrowser-extension:browser  (allowFileUploads, toolbar)
- *   @jupyterlab/notebook-extension:tracker     (kernelShutdown)
- * cause a TypeError crash on startup in JupyterLite 0.7.1 because those
- * plugin schemas do not match.  The DOM lockdown already hides these UI
- * elements at runtime, so these overrides are both redundant and harmful.
+ * Patch 7 — Fix jupyter-config-data:
+ *   a) Remove crashing plugin overrides (filebrowser, notebook-tracker)
+ *   b) Enforce JupyterLab Dark theme — keeps local dev + deployed in sync
  */
 const CRASH_KEYS = [
   '@jupyterlab/filebrowser-extension:browser',
   '@jupyterlab/notebook-extension:tracker',
 ];
 
+const FORCED_OVERRIDES = {
+  '@jupyterlab/apputils-extension:themes': { theme: 'JupyterLab Dark' },
+};
+
 try {
-  // The config data is embedded as JSON inside a <script id="jupyter-config-data"> tag.
-  // Use a regex that handles whitespace/newlines in the opening tag.
   const configMatch = html.match(/<script[\s\S]*?id=["']jupyter-config-data["'][\s\S]*?>([\s\S]*?)<\/script>/);
   if (configMatch) {
     let config;
@@ -360,20 +357,37 @@ try {
     }
     if (config) {
       let configChanged = false;
-      if (config.settingsOverrides) {
-        CRASH_KEYS.forEach((key) => {
-          if (config.settingsOverrides[key]) {
-            delete config.settingsOverrides[key];
-            configChanged = true;
-            console.log(`[patch-build] ✓ Removed crashing override: ${key}`);
-          }
-        });
+
+      // Ensure settingsOverrides exists
+      if (!config.settingsOverrides) {
+        config.settingsOverrides = {};
+        configChanged = true;
       }
+
+      // (a) Remove crashing keys
+      CRASH_KEYS.forEach((key) => {
+        if (config.settingsOverrides[key]) {
+          delete config.settingsOverrides[key];
+          configChanged = true;
+          console.log(`[patch-build] ✓ Removed crashing override: ${key}`);
+        }
+      });
+
+      // (b) Enforce dark theme and any other required overrides
+      Object.entries(FORCED_OVERRIDES).forEach(([key, value]) => {
+        const existing = JSON.stringify(config.settingsOverrides[key]);
+        const desired  = JSON.stringify(value);
+        if (existing !== desired) {
+          config.settingsOverrides[key] = value;
+          configChanged = true;
+          console.log(`[patch-build] ✓ Set forced override: ${key} =`, JSON.stringify(value));
+        }
+      });
+
       if (configChanged) {
         const newJson = JSON.stringify(config, null, 2);
-        // Replace the original JSON inside the script tag (preserve opening/closing tags)
         const fullTag = configMatch[0];
-        const newTag = fullTag.replace(configMatch[1], '\n' + newJson + '\n');
+        const newTag  = fullTag.replace(configMatch[1], '\n' + newJson + '\n');
         html = html.replace(fullTag, newTag);
         changed = true;
       }
