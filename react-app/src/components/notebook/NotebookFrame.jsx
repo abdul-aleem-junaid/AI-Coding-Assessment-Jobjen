@@ -5,6 +5,7 @@
 // so the assessment blur-overlay can react.
 
 import { useRef } from 'react'
+import { registerNotebookWindow } from '../../lib/notebookExport'
 
 export default function NotebookFrame({ onBlur, onFocus }) {
   const iframeRef = useRef(null)
@@ -13,6 +14,8 @@ export default function NotebookFrame({ onBlur, onFocus }) {
     try {
       const win = iframeRef.current?.contentWindow
       if (!win) return
+      // Expose the iframe window to the notebook-export bridge (parent side).
+      registerNotebookWindow(win)
       win.addEventListener('blur',  () => { if (!document.hasFocus()) onBlur?.() })
       win.addEventListener('focus', () => onFocus?.())
     } catch {

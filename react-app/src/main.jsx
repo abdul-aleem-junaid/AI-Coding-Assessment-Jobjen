@@ -8,8 +8,13 @@ import { createRoot } from 'react-dom/client'
 import { HashRouter } from 'react-router-dom'
 
 import { initDevToolsGuard } from './utils/devtoolsGuard'
+import { initSessionFromUrl } from './lib/session'
 import './styles/index.css'
 import App from './app/App.jsx'
+
+// Capture the magic-link token (?token=...&round=technical) before React renders
+// and before HashRouter rewrites the URL. The query string precedes the `#`.
+initSessionFromUrl()
 
 // Initialise the DevTools guard before React renders
 initDevToolsGuard()

@@ -69,5 +69,14 @@
 
 .jobjen-btn-success:hover:not(:disabled) { filter: brightness(1.1); }
 
+.jobjen-btn-secondary {
+  background: var(--bg-surface);
+  color: var(--text-main);
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  transition: filter 0.2s ease, border-color 0.2s ease;
+}
+.jobjen-btn-secondary:hover:not(:disabled) { border-color: var(--accent-purple); }
+
 .jobjen-surface { background-color: var(--bg-surface); }
 .jobjen-panel   { background-color: var(--bg-panel); }

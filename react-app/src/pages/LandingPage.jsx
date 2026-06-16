@@ -4,7 +4,7 @@
 // First screen the candidate sees. Shows the Jobjen brand and a CTA to
 // start the preflight check.
 
-export default function LandingPage({ onStart }) {
+export default function LandingPage({ onStart, starting = false }) {
   return (
     <div className="jobjen-hero w-screen h-screen flex flex-col items-center justify-center gap-4 font-sans">
       <span className="jobjen-badge text-[0.7rem] font-bold tracking-[0.12em] px-3 py-1 rounded-sm">
@@ -19,9 +19,10 @@ export default function LandingPage({ onStart }) {
       </p>
       <button
         onClick={onStart}
-        className="jobjen-btn-primary mt-2 px-8 py-3 text-base font-semibold rounded-md"
+        disabled={starting}
+        className="jobjen-btn-primary mt-2 px-8 py-3 text-base font-semibold rounded-md disabled:opacity-60"
       >
-        Start Assessment
+        {starting ? 'Starting…' : 'Start Assessment'}
       </button>
     </div>
   );

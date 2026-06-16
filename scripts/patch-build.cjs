@@ -269,6 +269,182 @@ const LOCKDOWN_SCRIPT = `
       })();
     </script>`;
 
+/* ── 6. Notebook export bridge (answers the parent app's export request) ──── */
+const NOTEBOOK_EXPORT_SCRIPT = `
+    <script>
+      /* JOBJEN NOTEBOOK EXPORT BRIDGE
+         The parent React app postMessages { type:'jobjen:exportNotebooks', id }.
+         We walk the JupyterLite Contents API for every .ipynb in the workspace
+         and reply { type:'jobjen:notebooks', id, files:[{name, content}] }. */
+      (function () {
+        function getApp() {
+          return window.jupyterapp || window.jupyterlab || null;
+        }
+
+        async function listNotebooks(contents, path) {
+          var model = await contents.get(path, { content: true });
+          var out = [];
+          if (model.type === 'directory') {
+            for (var i = 0; i < (model.content || []).length; i++) {
+              out = out.concat(await listNotebooks(contents, model.content[i].path));
+            }
+          } else if (
+            model.type === 'notebook' ||
+            (model.name && model.name.toLowerCase().endsWith('.ipynb'))
+          ) {
+            out.push({ name: model.path || model.name, content: model.content });
+          }
+          return out;
+        }
+
+        async function collect() {
+          var app = getApp();
+          if (!app || !app.serviceManager || !app.serviceManager.contents) {
+            throw new Error('Notebook workspace is not ready yet.');
+          }
+          var contents = app.serviceManager.contents;
+          /* Persist any unsaved editor state first, best-effort. */
+          try {
+            if (app.commands && app.commands.hasCommand('docmanager:save')) {
+              await app.commands.execute('docmanager:save');
+            }
+          } catch (e) {}
+          return await listNotebooks(contents, '');
+        }
+
+        window.addEventListener('message', function (event) {
+          var data = event.data;
+          if (!data || data.type !== 'jobjen:exportNotebooks') return;
+          var id = data.id;
+          collect()
+            .then(function (files) {
+              window.parent.postMessage(
+                { type: 'jobjen:notebooks', id: id, files: files },
+                '*'
+              );
+            })
+            .catch(function (err) {
+              window.parent.postMessage(
+                {
+                  type: 'jobjen:notebooks',
+                  id: id,
+                  files: [],
+                  error: (err && err.message) || 'Notebook export failed.'
+                },
+                '*'
+              );
+            });
+        });
+      })();
+    </script>`;
+
+/* ── 7. Notebook import bridge (seeds question files into the workspace) ──── */
+const NOTEBOOK_IMPORT_SCRIPT = `
+    <script>
+      /* JOBJEN NOTEBOOK IMPORT BRIDGE
+         The parent React app postMessages
+           { type:'jobjen:importFiles', id, files:[{name, base64, mime}], open }
+         We write each file into the JupyterLite Contents API so it appears in
+         the file browser, then (if open) open the primary file. Reply with
+         { type:'jobjen:filesImported', id, imported }. */
+      (function () {
+        function getApp() {
+          return window.jupyterapp || window.jupyterlab || null;
+        }
+
+        function waitForApp(timeoutMs) {
+          var start = Date.now();
+          return new Promise(function (resolve, reject) {
+            (function tick() {
+              var app = getApp();
+              if (app && app.serviceManager && app.serviceManager.contents) {
+                app.serviceManager.ready
+                  ? app.serviceManager.ready.then(function () { resolve(app); }, function () { resolve(app); })
+                  : resolve(app);
+                return;
+              }
+              if (Date.now() - start > (timeoutMs || 60000)) {
+                reject(new Error('Notebook workspace is not ready.'));
+                return;
+              }
+              setTimeout(tick, 250);
+            })();
+          });
+        }
+
+        var TEXT_EXT = ['.py','.txt','.md','.csv','.json','.html','.js','.ts','.r','.yml','.yaml','.cfg','.ini','.sql'];
+        function isTextName(name) {
+          var lower = name.toLowerCase();
+          for (var i = 0; i < TEXT_EXT.length; i++) {
+            if (lower.endsWith(TEXT_EXT[i])) return true;
+          }
+          return false;
+        }
+        function b64ToText(b64) {
+          var bin = atob(b64);
+          var bytes = new Uint8Array(bin.length);
+          for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          return new TextDecoder('utf-8').decode(bytes);
+        }
+
+        async function importFiles(contents, files) {
+          var firstNotebook = null;
+          var firstAny = null;
+          for (var i = 0; i < files.length; i++) {
+            var f = files[i];
+            var name = f.name;
+            if (firstAny === null) firstAny = name;
+            try {
+              if (name.toLowerCase().endsWith('.ipynb')) {
+                var nb = JSON.parse(b64ToText(f.base64));
+                await contents.save(name, { type: 'notebook', format: 'json', content: nb });
+                if (firstNotebook === null) firstNotebook = name;
+              } else if (isTextName(name)) {
+                await contents.save(name, { type: 'file', format: 'text', content: b64ToText(f.base64) });
+              } else {
+                await contents.save(name, { type: 'file', format: 'base64', content: f.base64 });
+              }
+            } catch (e) {
+              /* skip a single bad file, keep going */
+            }
+          }
+          return { firstNotebook: firstNotebook, firstAny: firstAny };
+        }
+
+        window.addEventListener('message', function (event) {
+          var data = event.data;
+          if (!data || data.type !== 'jobjen:importFiles') return;
+          var id = data.id;
+          var files = data.files || [];
+          var open = data.open;
+          waitForApp(60000)
+            .then(function (app) {
+              return importFiles(app.serviceManager.contents, files).then(function (res) {
+                var toOpen = res.firstNotebook || res.firstAny;
+                if (open && toOpen) {
+                  try { app.commands.execute('docmanager:open', { path: toOpen }); } catch (e) {}
+                }
+                window.parent.postMessage(
+                  { type: 'jobjen:filesImported', id: id, imported: files.length },
+                  '*'
+                );
+              });
+            })
+            .catch(function (err) {
+              window.parent.postMessage(
+                {
+                  type: 'jobjen:filesImported',
+                  id: id,
+                  imported: 0,
+                  error: (err && err.message) || 'File import failed.'
+                },
+                '*'
+              );
+            });
+        });
+      })();
+    </script>`;
+
 /* ── Apply patches ───────────────────────────────────────────────────────── */
 let html = fs.readFileSync(target, "utf8");
 let changed = false;
@@ -306,6 +482,20 @@ if (!html.includes("ITEM_NAMES")) {
   html = html.replace("  </body>", `${LOCKDOWN_SCRIPT}\n  </body>`);
   changed = true;
   console.log("[patch-build] ✓ MutationObserver lockdown injected");
+}
+
+/* Patch 8 — Notebook export bridge */
+if (!html.includes("jobjen:exportNotebooks")) {
+  html = html.replace("  </body>", `${NOTEBOOK_EXPORT_SCRIPT}\n  </body>`);
+  changed = true;
+  console.log("[patch-build] ✓ Notebook export bridge injected");
+}
+
+/* Patch 9 — Notebook import bridge */
+if (!html.includes("jobjen:importFiles")) {
+  html = html.replace("  </body>", `${NOTEBOOK_IMPORT_SCRIPT}\n  </body>`);
+  changed = true;
+  console.log("[patch-build] ✓ Notebook import bridge injected");
 }
 
 /*
@@ -362,6 +552,16 @@ try {
       if (!config.settingsOverrides) {
         config.settingsOverrides = {};
         configChanged = true;
+      }
+
+      // (0) Expose the JupyterLab/Lite app instance on `window.jupyterapp` so
+      //     the Jobjen import/export bridges (Patch 8 / 9) can reach the
+      //     Contents API. Without this flag JupyterLite sets no global and the
+      //     bridges have no way to read/write notebooks.
+      if (config.exposeAppInBrowser !== true) {
+        config.exposeAppInBrowser = true;
+        configChanged = true;
+        console.log('[patch-build] ✓ exposeAppInBrowser enabled (window.jupyterapp)');
       }
 
       // (a) Remove crashing keys

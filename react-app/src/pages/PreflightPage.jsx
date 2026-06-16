@@ -5,6 +5,7 @@
 // begins. On success, calls onBegin() to navigate to /assessment.
 
 import { useState, useEffect, useRef } from "react";
+import { acquireScreenStream } from "../lib/screenRecorder";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const RULES = [
@@ -57,9 +58,10 @@ const MicIcon = () => (
 );
 
 // ── Component ────────────────────────────────────────────────────────────────
-export default function PreflightPage({ streamRef, onBegin }) {
+export default function PreflightPage({ streamRef, screenStreamRef, onBegin }) {
   const [permission, setPermission] = useState("idle"); // idle | requesting | granted | denied
   const [micLevel, setMicLevel] = useState(0);
+  const [screenState, setScreenState] = useState("idle"); // idle | requesting | error
 
   const preflightVideoRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -113,6 +115,20 @@ export default function PreflightPage({ streamRef, onBegin }) {
       startMicMeter(stream);
     } catch {
       setPermission("denied");
+    }
+  };
+
+  // Screen-share is requested on the "Begin" gesture (getDisplayMedia needs a
+  // user gesture). We record the SCREEN + mic; the webcam stays a live PiP.
+  const beginAssessment = async () => {
+    setScreenState("requesting");
+    try {
+      const screen = await acquireScreenStream();
+      screenStreamRef.current = screen;
+      setScreenState("idle");
+      onBegin();
+    } catch {
+      setScreenState("error");
     }
   };
 
@@ -231,12 +247,27 @@ export default function PreflightPage({ streamRef, onBegin }) {
             </button>
           )}
           {permission === "granted" && (
-            <button
-              onClick={onBegin}
-              className="jobjen-btn-success w-full py-3.5 px-8 text-base font-semibold rounded-xl"
-            >
-              Begin Assessment
-            </button>
+            <>
+              <button
+                onClick={beginAssessment}
+                disabled={screenState === "requesting"}
+                className="jobjen-btn-success w-full py-3.5 px-8 text-base font-semibold rounded-xl disabled:opacity-60"
+              >
+                {screenState === "requesting"
+                  ? "Waiting for screen share…"
+                  : "Share Screen & Begin"}
+              </button>
+              <p className="text-xs text-jobjen-subtle mt-2 text-center leading-relaxed">
+                You'll be asked to share your <strong>entire screen</strong> —
+                this is recorded for the duration of the assessment.
+                {screenState === "error" && (
+                  <span className="block text-red-400 mt-1">
+                    Screen sharing was denied or cancelled. You must share your
+                    full screen to continue.
+                  </span>
+                )}
+              </p>
+            </>
           )}
           {permission === "denied" && (
             <button
