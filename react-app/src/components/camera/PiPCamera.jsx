@@ -57,8 +57,8 @@ export default function PiPCamera({ streamRef }) {
   return (
     <div
       ref={pipRef}
-      className="fixed bottom-4 right-4 w-[200px] h-[140px] bg-jobjen-panel rounded-xl overflow-hidden z-[1000] shadow-[0_4px_20px_rgba(0,0,0,0.5)] border-2 border-jobjen-border cursor-grab active:cursor-grabbing select-none touch-none"
-      style={pipPos ? { left: pipPos.x, top: pipPos.y, right: 'auto', bottom: 'auto' } : undefined}
+      className="fixed bottom-4 left-4 w-[200px] h-[140px] bg-jobjen-panel rounded-xl overflow-hidden z-[1000] shadow-[0_4px_20px_rgba(0,0,0,0.5)] border-2 border-jobjen-border cursor-grab active:cursor-grabbing select-none touch-none"
+      style={pipPos ? { left: pipPos.x, top: pipPos.y, bottom: 'auto' } : undefined}
       onMouseDown={(e) => { e.preventDefault(); startDrag(e.clientX, e.clientY) }}
       onTouchStart={(e) => startDrag(e.touches[0].clientX, e.touches[0].clientY)}
     >
