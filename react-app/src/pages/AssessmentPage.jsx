@@ -1,13 +1,12 @@
 // src/pages/AssessmentPage.jsx
 //
 // Route: "/assessment"
-// Full-screen assessment layout: a thin top toolbar (task + submit), the
+// Full-screen assessment layout: a thin top toolbar (submit), the
 // JupyterLite notebook iframe, the AI chat panel, and a draggable PiP camera.
 // On mount it starts the screen+mic recording (streamed to S3); on Submit it
 // finalizes the recording, uploads all workspace notebooks, and submits.
 
 import { useState, useEffect, useRef } from 'react'
-import Markdown from 'react-markdown'
 import ChatPanel      from '../components/chat/ChatPanel'
 import NotebookFrame  from '../components/notebook/NotebookFrame'
 import PiPCamera      from '../components/camera/PiPCamera'
@@ -33,7 +32,6 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
   const session = useSession()
   const [chatOpen, setChatOpen] = useState(true)
   const [blurred,  setBlurred]  = useState(false)
-  const [taskOpen, setTaskOpen] = useState(false)
   const [phase, setPhase] = useState('active') // active | submitting | done
   const [submitStep, setSubmitStep] = useState('')
   const [submitError, setSubmitError] = useState('')
@@ -51,7 +49,7 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
     importedRef.current = true
     importQuestionFiles(files, { open: true }).catch((err) => {
       console.error('[assessment] file import failed:', err)
-      setRecWarning((w) => w || 'Some task files could not be loaded into the notebook. You can still download them from "View Task".')
+      setRecWarning((w) => w || 'Some task files could not be loaded into the notebook automatically. Please contact your recruiter if any files are missing.')
     })
   }, [])
 
@@ -153,8 +151,6 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
     )
   }
 
-  const question = session.question
-
   return (
     <div className="w-screen h-screen flex flex-col">
       {/* Top toolbar */}
@@ -164,12 +160,6 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
           Technical Round{session.candidateName ? ` — ${session.candidateName}` : ''}
         </span>
         <div className="ml-auto flex items-center gap-2">
-          <button
-            onClick={() => setTaskOpen(true)}
-            className="jobjen-btn-secondary px-3.5 py-1.5 text-xs font-semibold rounded-md"
-          >
-            View Task
-          </button>
           <button
             onClick={handleSubmit}
             disabled={phase === 'submitting'}
@@ -219,61 +209,6 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
         {/* Draggable PiP camera */}
         <PiPCamera streamRef={streamRef} />
       </div>
-
-      {/* Task modal */}
-      {taskOpen && (
-        <div
-          className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-6"
-          onClick={() => setTaskOpen(false)}
-        >
-          <div
-            className="bg-jobjen-surface border border-jobjen-border rounded-2xl max-w-[760px] w-full max-h-[80vh] overflow-y-auto p-7 font-sans"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start gap-3 mb-4">
-              <h2 className="text-xl font-bold text-jobjen-text">
-                {question?.name ?? 'Your Task'}
-              </h2>
-              <button
-                onClick={() => setTaskOpen(false)}
-                className="ml-auto text-jobjen-subtle hover:text-jobjen-text text-2xl leading-none"
-              >
-                ×
-              </button>
-            </div>
-            {question?.timeLimit > 0 && (
-              <p className="text-xs text-jobjen-subtle mb-4">
-                Suggested time: {question.timeLimit} minutes
-              </p>
-            )}
-            <div className="prose prose-invert prose-sm max-w-none text-jobjen-muted">
-              <Markdown>{question?.description || 'No description provided.'}</Markdown>
-            </div>
-            {question?.files?.length > 0 && (
-              <div className="mt-5 border-t border-jobjen-border pt-4">
-                <p className="text-xs font-semibold text-jobjen-text mb-2 uppercase tracking-wide">
-                  Attachments
-                </p>
-                <ul className="flex flex-col gap-1.5">
-                  {question.files.map((f) => (
-                    <li key={f.name}>
-                      <a
-                        href={f.downloadUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-sm text-jobjen-accent hover:underline"
-                      >
-                        {f.name}
-                      </a>
-                      {f.purpose ? <span className="text-jobjen-subtle text-xs"> — {f.purpose}</span> : null}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Submitting overlay */}
       {phase === 'submitting' && (
