@@ -118,3 +118,8 @@ _output
 # react-app generated files
 react-app/public/lab/
 react-app/dist/
+
+# react-app env files — secrets must be set in Vercel dashboard, never committed
+react-app/.env
+react-app/.env.local
+react-app/.env.production
