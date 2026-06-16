@@ -6,7 +6,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
 
-import { registerDevToolsToast, setDevToolsGuardActive, isDevToolsTriggered } from '../utils/devtoolsGuard'
+import { registerDevToolsToast, setDevToolsGuardActive, isDevToolsTriggered, DEVTOOLS_GUARD_ENABLED } from '../utils/devtoolsGuard'
 import LandingPage    from '../pages/LandingPage'
 import PreflightPage  from '../pages/PreflightPage'
 import AssessmentPage from '../pages/AssessmentPage'
@@ -34,12 +34,13 @@ export default function App() {
 
   // Activate / suspend the guard depending on the current route
   useEffect(() => {
+    if (!DEVTOOLS_GUARD_ENABLED) return
     setDevToolsGuardActive(isAssessment)
   }, [isAssessment])
 
   // Block DevTools keyboard shortcuts on the assessment page
   useEffect(() => {
-    if (!isAssessment) return
+    if (!DEVTOOLS_GUARD_ENABLED || !isAssessment) return
 
     const onKeyDown = (e) => {
       const isDevShortcut =
