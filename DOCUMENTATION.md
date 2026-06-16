@@ -8,31 +8,28 @@ A React (Vite) application that wraps JupyterLite inside an iframe with security
 
 ```
 AI-Coding-Assessment-Jobjen/
-├── .github/
-│   └── workflows/
-│       └── deploy.yml          ← CI/CD pipeline
 ├── react-app/
 │   ├── public/
-│   │   ├── coi-serviceworker.js   ← Cross-origin isolation service worker
+│   │   ├── coi-serviceworker.js   ← Cross-origin isolation service worker (fallback)
 │   │   └── lab/                   ← Built JupyterLite output (gitignored)
 │   │       └── lab/
 │   │           └── index.html     ← Patched JupyterLite Lab UI
-│   ├── src/
-│   │   ├── App.jsx             ← Main React component (all app logic)
-│   │   ├── App.css             ← Styles for all UI elements
-│   │   ├── main.jsx            ← React entry point
-│   │   └── index.css           ← Base HTML/body reset styles
+│   ├── src/                    ← React app (pages/, components/, lib/, utils/)
 │   ├── index.html              ← HTML shell (service worker + key blocking)
 │   ├── package.json            ← npm dependencies and scripts
 │   ├── package-lock.json       ← Locked dependency versions
-│   └── vite.config.js          ← Vite build config with COOP/COEP headers
+│   └── vite.config.js          ← Vite config (COOP/COEP dev headers + /api proxy)
 ├── scripts/
+│   ├── install-all.mjs         ← Installs Python + Node deps (one command)
+│   ├── build-all.mjs           ← JupyterLite build → patch → Vite build
 │   └── patch-build.cjs         ← Post-build patcher for JupyterLite HTML
+├── vercel.json                 ← Deploy contract (build commands, /api rewrite, headers)
+├── package.json                ← Root build orchestration scripts
+├── requirements.txt            ← Python packages for the JupyterLite build
+├── .vercelignore               ← Excludes regenerated dirs from the Vercel upload
 ├── .gitignore                  ← Ignores build artifacts and node_modules
-├── .nojekyll                   ← Disables Jekyll on GitHub Pages
 ├── LICENSE                     ← Project license
-├── README.md                   ← Project readme
-└── requirements.txt            ← Python packages for JupyterLite build
+└── README.md                   ← Project readme
 ```
 
 ---
@@ -110,8 +107,9 @@ Contains two inline scripts that run before React loads:
 **Vite build configuration.**
 
 - `plugins: [react()]` — enables JSX transform via `@vitejs/plugin-react`
-- `base: './'` — makes all asset paths relative, required for GitHub Pages deployment (the app is served from a subdirectory)
-- `server.headers` — adds `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` to every dev-server response. These headers are required for `SharedArrayBuffer`, which Pyodide (the Python kernel) uses. In production, these headers are injected by `coi-serviceworker.js` instead.
+- `base: './'` — makes all asset paths relative so the bundle works from any path
+- `server.headers` — adds `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` to every dev-server response. These headers are required for `SharedArrayBuffer`, which Pyodide (the Python kernel) uses. In production they're set by `vercel.json`, with `coi-serviceworker.js` as a fallback.
+- `server.proxy` — forwards `/api` to the backend (default `http://localhost:3001`, override with `VITE_DEV_PROXY_TARGET`) so dev calls are same-origin (no CORS).
 
 ---
 
@@ -137,7 +135,7 @@ Contains two inline scripts that run before React loads:
 ### `react-app/public/coi-serviceworker.js`
 **Cross-origin isolation service worker.**
 
-JupyterLite's Pyodide Python kernel requires `SharedArrayBuffer`, which browsers only allow on pages with cross-origin isolation (`COOP: same-origin` + `COEP: require-corp` headers). GitHub Pages cannot set custom HTTP headers.
+JupyterLite's Pyodide Python kernel requires `SharedArrayBuffer`, which browsers only allow on pages with cross-origin isolation (`COOP: same-origin` + `COEP: require-corp` headers). On Vercel these are set at the edge by `vercel.json`; this service worker is a **fallback** for hosts that can't set custom HTTP headers (and a no-op once the page is already isolated).
 
 This service worker intercepts every fetch request and adds the three required headers to responses:
 - `Cross-Origin-Opener-Policy: same-origin`
@@ -151,7 +149,7 @@ On first install it calls `skipWaiting()` and `clients.claim()` so it activates 
 ### `react-app/public/lab/` (gitignored — generated at build time)
 **JupyterLite static build output.**
 
-This directory does not exist in the repository. It is generated during CI by:
+This directory does not exist in the repository. It is generated at build time by:
 ```
 jupyter lite build --output-dir react-app/public/lab
 ```
@@ -189,23 +187,19 @@ node scripts/patch-build.cjs
 
 ---
 
-### `.github/workflows/deploy.yml`
-**CI/CD pipeline for GitHub Actions.**
+### `vercel.json` + `package.json` + `scripts/*.mjs`
+**The deploy contract (Vercel) and the one-command build orchestration.**
 
-Runs on every push to `main` and on pull requests. Steps in order:
+`vercel.json` tells Vercel to install and build everything itself:
+- `installCommand` → `node scripts/install-all.mjs` (pip install `requirements.txt` + `npm ci` in `react-app/`)
+- `buildCommand` → `node scripts/build-all.mjs` (`jupyter lite build` → `patch-build.cjs` → `vite build`)
+- `outputDirectory` → `react-app/dist`
+- `rewrites` → proxies `/api/*` to the backend so the SPA is same-origin (no CORS)
+- `headers` → COOP/COEP (cross-origin isolation for Pyodide) + caching + security headers
 
-| Step | What it does |
-|---|---|
-| Checkout | Checks out the repository |
-| Setup Python 3.11 | Installs Python for the JupyterLite build |
-| Install Python dependencies | `pip install -r requirements.txt` |
-| Build JupyterLite | `jupyter lite build --output-dir react-app/public/lab` |
-| Patch JupyterLite | `node scripts/patch-build.cjs` — injects security scripts |
-| Setup Node.js 20 | Installs Node for the React build |
-| Install React dependencies | `npm ci` inside `react-app/` |
-| Build React app | `npm run build` — outputs to `react-app/dist/` |
-| Upload artifact | Uploads `react-app/dist/` as a GitHub Pages artifact |
-| Deploy | Deploys the artifact to GitHub Pages (only on `main` pushes) |
+The root `package.json` exposes the same orchestrators locally: `npm run install:all`,
+`npm run build`, `npm run dev`. The `scripts/*.mjs` are cross-platform (probe
+`python3`/`python`, run from the repo root with relative args).
 
 ---
 
@@ -249,13 +243,6 @@ Key entries relevant to this project:
 
 ---
 
-### `.nojekyll`
-**Empty file required for GitHub Pages.**
-
-By default, GitHub Pages runs Jekyll on the repository and ignores files and folders that start with an underscore (`_`). JupyterLite generates several such directories (e.g., `_static/`). The `.nojekyll` file tells GitHub Pages to serve the files as-is without any Jekyll processing.
-
----
-
 ## How Everything Connects
 
 ```
@@ -277,23 +264,31 @@ Browser
 
 ## Local Development
 
-```bash
-# 1. Build JupyterLite (one-time or after changing requirements.txt)
-pip install -r requirements.txt
-jupyter lite build --output-dir react-app/public/lab
-node scripts/patch-build.cjs
+Two commands from the repo root — the first installs every dependency (Python +
+Node), the second builds JupyterLite, patches it, and bundles the React app:
 
-# 2. Run the React dev server
-cd react-app
-npm install
-npm run dev
-# → http://localhost:5173
+```bash
+npm run install:all   # pip install -r requirements.txt  +  npm ci in react-app/
+npm run build         # jupyter lite build → patch-build → vite build
+npm run dev           # Vite dev server → http://localhost:5173 (proxies /api)
 ```
 
-> **Windows note:** `jupyter lite build` may fail due to the 260-character MAX_PATH limit.
-> Workaround: build to a short path then copy:
-> ```bash
-> jupyter lite build --output-dir C:\jlbuild
-> node -e "require('fs').cpSync('C:/jlbuild', 'react-app/public/lab', {recursive:true, force:true})"
-> node scripts/patch-build.cjs
+Requires **Node.js 20+** and **Python 3** on PATH.
+
+> **Windows note:** JupyterLite writes deeply nested extension paths that exceed
+> the legacy 260-char `MAX_PATH`. Enable long paths once, as admin, then restart
+> the terminal:
+> ```powershell
+> reg add HKLM\SYSTEM\CurrentControlSet\Control\FileSystem /v LongPathsEnabled /t REG_DWORD /d 1 /f
 > ```
+> Linux/macOS and Vercel's build are unaffected.
+
+## Deployment (Vercel)
+
+`vercel.json` makes the platform install + build everything automatically — no
+manual steps. Import the repo into Vercel with **Root Directory** = repo root,
+**Framework** = *Other*, **Node** = *20.x*; set the env vars from
+[react-app/.env.example](react-app/.env.example) (leave `VITE_API_BASE_URL`
+empty so `/api` is rewritten to the backend); point the `/api` rewrite in
+`vercel.json` at your backend origin; deploy. See [README.md](README.md) for the
+full checklist and the S3-CORS prerequisite.
