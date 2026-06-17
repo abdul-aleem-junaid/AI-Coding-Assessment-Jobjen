@@ -54,9 +54,12 @@ async function fetchPublicKey() {
   const headers = {};
   if (BASIC_AUTH_HEADER) headers["Authorization"] = BASIC_AUTH_HEADER;
 
-  const apiBaseUrl = (
-    import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001"
-  ).replace(/\/+$/, "");
+  // Same single source as api.js: the backend origin comes only from
+  // VITE_API_BASE_URL (no hardcoded fallback).
+  const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || "").replace(
+    /\/+$/,
+    "",
+  );
 
   const res = await fetch(`${apiBaseUrl}/api/crypto/public-key`, {
     cache: "no-store",

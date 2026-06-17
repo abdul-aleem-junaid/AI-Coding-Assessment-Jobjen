@@ -19,10 +19,22 @@ import { getToken } from "./session";
 const defaultHeaders = { "X-Requested-With": "XMLHttpRequest" };
 if (BASIC_AUTH_HEADER) defaultHeaders.Authorization = BASIC_AUTH_HEADER;
 
-/** Absolute origin of jobjen-backend (no trailing slash, no /api). */
-export const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001"
-).replace(/\/+$/, "");
+/**
+ * Absolute origin of jobjen-backend (no trailing slash, no /api). This is the
+ * ONLY source of the backend location: it comes solely from VITE_API_BASE_URL
+ * (set in .env locally / the Vercel dashboard in prod). No hardcoded fallback
+ * and no relative/proxy mode — every request goes to this URL and nowhere else.
+ */
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(
+  /\/+$/,
+  "",
+);
+if (!API_BASE_URL) {
+  console.error(
+    "[api] VITE_API_BASE_URL is not set — backend requests cannot be sent. " +
+      "Set it to the backend origin, e.g. https://api.jobjen.com",
+  );
+}
 
 /** Resolve a backend path to an absolute URL (for the few calls that don't go
  *  through the axios instance, e.g. the crypto bootstrap). */

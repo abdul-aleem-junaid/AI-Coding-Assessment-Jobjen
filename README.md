@@ -39,12 +39,13 @@ everything (JupyterLite → patch → Vite):
 ```bash
 npm run install:all   # pip install -r requirements.txt  +  npm ci in react-app/
 npm run build         # jupyter lite build → patch-build → vite build
-npm run dev           # Vite dev server (proxies /api → backend, see vite.config.js)
+npm run dev           # Vite dev server (calls VITE_API_BASE_URL directly)
 ```
 
-By default the dev server proxies `/api` to `http://localhost:3001`. Point it
-elsewhere with `VITE_DEV_PROXY_TARGET`. See [react-app/.env.example](react-app/.env.example)
-for the build-time env vars.
+Set `VITE_API_BASE_URL` in [react-app/.env](react-app/.env) to your backend
+origin (e.g. `http://localhost:3001`) — the app sends every request straight
+there. See [react-app/.env.example](react-app/.env.example) for all build-time
+env vars.
 
 ## Deployment (Vercel)
 
@@ -56,23 +57,22 @@ from the install/build commands. No manual steps.
    folder, so `requirements.txt`, `scripts/`, and `react-app/` are all in scope),
    **Framework Preset** = *Other*, **Node.js** = *20.x*.
 2. **Environment variables** (Production + Preview):
-   - `VITE_API_BASE_URL` — leave **empty** (the SPA calls a relative `/api`,
-     which `vercel.json` rewrites to the backend).
+   - `VITE_API_BASE_URL` — **set this** to the backend origin (e.g.
+     `https://api.jobjen.com`, no trailing slash / no `/api`). The app sends
+     every request here directly; it's the only place the backend URL lives.
    - `VITE_ENABLE_DEVTOOLS_GUARD` = `true`
    - `VITE_API_BASIC_AUTH` (or `VITE_API_BASIC_AUTH_USER` / `_PASS` / `_MARKER`)
      if the backend's perimeter Basic Auth is enabled.
-3. **Backend origin:** the rewrite in [vercel.json](vercel.json) points `/api/*`
-   at `https://api.jobjen.com`. Change that line if you deploy against a
-   different backend (e.g. a Railway dev URL).
-4. **Deploy.** Pushes to the connected branch build and deploy automatically;
+3. **Deploy.** Pushes to the connected branch build and deploy automatically;
    every branch/PR gets a preview URL.
 
 ### Backend / infra prerequisites
+- **Backend CORS** (`FRONTEND_ORIGIN`) must include this SPA's deployed origin —
+  requests go cross-origin straight to `VITE_API_BASE_URL`, so without it the
+  crypto bootstrap and every API call are blocked.
 - **S3 bucket CORS** must allow the SPA's origin: `PUT` + `GET`, and **expose the
   `ETag` header** (the resumable screen-recording upload reads it). Without this
   the multipart upload fails.
-- The crypto envelope, single-use JWT, and Basic Auth perimeter are all handled
-  by the backend; the SPA just needs to reach it (same-origin via the rewrite).
 
 ## How it works (flow)
 

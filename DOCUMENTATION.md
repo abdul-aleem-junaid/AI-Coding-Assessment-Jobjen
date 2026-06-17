@@ -18,12 +18,12 @@ AI-Coding-Assessment-Jobjen/
 │   ├── index.html              ← HTML shell (service worker + key blocking)
 │   ├── package.json            ← npm dependencies and scripts
 │   ├── package-lock.json       ← Locked dependency versions
-│   └── vite.config.js          ← Vite config (COOP/COEP dev headers + /api proxy)
+│   └── vite.config.js          ← Vite config (COOP/COEP dev headers)
 ├── scripts/
 │   ├── install-all.mjs         ← Installs Python + Node deps (one command)
 │   ├── build-all.mjs           ← JupyterLite build → patch → Vite build
 │   └── patch-build.cjs         ← Post-build patcher for JupyterLite HTML
-├── vercel.json                 ← Deploy contract (build commands, /api rewrite, headers)
+├── vercel.json                 ← Deploy contract (build commands, headers)
 ├── package.json                ← Root build orchestration scripts
 ├── requirements.txt            ← Python packages for the JupyterLite build
 ├── .vercelignore               ← Excludes regenerated dirs from the Vercel upload
@@ -109,7 +109,7 @@ Contains two inline scripts that run before React loads:
 - `plugins: [react()]` — enables JSX transform via `@vitejs/plugin-react`
 - `base: './'` — makes all asset paths relative so the bundle works from any path
 - `server.headers` — adds `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` to every dev-server response. These headers are required for `SharedArrayBuffer`, which Pyodide (the Python kernel) uses. In production they're set by `vercel.json`, with `coi-serviceworker.js` as a fallback.
-- `server.proxy` — forwards `/api` to the backend (default `http://localhost:3001`, override with `VITE_DEV_PROXY_TARGET`) so dev calls are same-origin (no CORS).
+- No dev proxy: the app sends every API request directly to `VITE_API_BASE_URL` (see `src/lib/api.js`), in dev and prod alike, so the backend must allow this origin via CORS.
 
 ---
 
@@ -194,7 +194,6 @@ node scripts/patch-build.cjs
 - `installCommand` → `node scripts/install-all.mjs` (pip install `requirements.txt` + `npm ci` in `react-app/`)
 - `buildCommand` → `node scripts/build-all.mjs` (`jupyter lite build` → `patch-build.cjs` → `vite build`)
 - `outputDirectory` → `react-app/dist`
-- `rewrites` → proxies `/api/*` to the backend so the SPA is same-origin (no CORS)
 - `headers` → COOP/COEP (cross-origin isolation for Pyodide) + caching + security headers
 
 The root `package.json` exposes the same orchestrators locally: `npm run install:all`,
@@ -288,7 +287,7 @@ Requires **Node.js 20+** and **Python 3** on PATH.
 `vercel.json` makes the platform install + build everything automatically — no
 manual steps. Import the repo into Vercel with **Root Directory** = repo root,
 **Framework** = *Other*, **Node** = *20.x*; set the env vars from
-[react-app/.env.example](react-app/.env.example) (leave `VITE_API_BASE_URL`
-empty so `/api` is rewritten to the backend); point the `/api` rewrite in
-`vercel.json` at your backend origin; deploy. See [README.md](README.md) for the
-full checklist and the S3-CORS prerequisite.
+[react-app/.env.example](react-app/.env.example) — including `VITE_API_BASE_URL`
+= your backend origin, the only place it's configured; deploy. The backend's
+`FRONTEND_ORIGIN` (CORS) must include the deployed SPA origin. See
+[README.md](README.md) for the full checklist and the S3-CORS prerequisite.
