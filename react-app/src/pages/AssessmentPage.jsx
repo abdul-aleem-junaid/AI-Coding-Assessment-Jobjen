@@ -6,7 +6,7 @@
 // On mount it starts the screen+mic recording (streamed to S3); on Submit it
 // finalizes the recording, uploads all workspace notebooks, and submits.
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import ChatPanel      from '../components/chat/ChatPanel'
 import NotebookFrame  from '../components/notebook/NotebookFrame'
 import PiPCamera      from '../components/camera/PiPCamera'
@@ -28,6 +28,14 @@ const SUBMIT_LABELS = {
   finalizing: 'Submitting your assessment…',
 }
 
+/** mm:ss for the countdown pill. */
+function formatRemaining(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  const m = Math.floor(total / 60)
+  const s = total % 60
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
 export default function AssessmentPage({ streamRef, screenStreamRef }) {
   const session = useSession()
   const [chatOpen, setChatOpen] = useState(true)
@@ -43,6 +51,17 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
   const recorderRef = useRef(null)
   const startedRef = useRef(false)
   const importedRef = useRef(false)
+  const autoSubmittedRef = useRef(false)
+
+  // Absolute deadline (ms) from the server; 0 = no time limit. Recomputed only
+  // when the server value changes, so close/reopen keeps the same deadline.
+  const deadlineMs = useMemo(() => {
+    const t = session.deadlineAt ? new Date(session.deadlineAt).getTime() : 0
+    return Number.isFinite(t) && t > 0 ? t : 0
+  }, [session.deadlineAt])
+  const [remainingMs, setRemainingMs] = useState(() =>
+    deadlineMs ? Math.max(0, deadlineMs - Date.now()) : 0,
+  )
 
   // Seed the question's attachment files into the JupyterLite workspace once, so
   // the candidate sees them directly (the primary file auto-opens).
@@ -129,14 +148,18 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
     }
   }
 
-  const handleSubmit = async () => {
+  const handleSubmit = async ({ auto = false } = {}) => {
     if (phase === 'submitting') return
-    if (recordingDown) {
-      setSubmitError('Your screen is not being recorded. Please re-share your entire screen before submitting.')
-      return
+    // Manual submit needs an active recording + confirmation. An automatic
+    // time-up submit bypasses both — time is up, we submit whatever exists.
+    if (!auto) {
+      if (recordingDown) {
+        setSubmitError('Your screen is not being recorded. Please re-share your entire screen before submitting.')
+        return
+      }
+      const ok = window.confirm('Submit your assessment? You will not be able to make further changes.')
+      if (!ok) return
     }
-    const ok = window.confirm('Submit your assessment? You will not be able to make further changes.')
-    if (!ok) return
 
     const { sessionId } = getSession()
     setPhase('submitting')
@@ -182,6 +205,25 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
     setPhase('done')
   }
 
+  // Time-budget countdown + auto-submit. Recomputed from the SERVER deadline on
+  // every tick, so close/reopen continues correctly (no reset, no pause).
+  // Auto-submits exactly once when the clock hits zero.
+  useEffect(() => {
+    if (!deadlineMs) return // no time limit on this question
+    const tick = () => {
+      const left = Math.max(0, deadlineMs - Date.now())
+      setRemainingMs(left)
+      if (left <= 0 && !autoSubmittedRef.current && phase === 'active') {
+        autoSubmittedRef.current = true
+        handleSubmit({ auto: true })
+      }
+    }
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deadlineMs, phase])
+
   // ── Terminal "submitted" screen ────────────────────────────────────────
   if (phase === 'done') {
     return (
@@ -205,8 +247,22 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
           Technical Round{session.candidateName ? ` — ${session.candidateName}` : ''}
         </span>
         <div className="ml-auto flex items-center gap-2">
+          {deadlineMs ? (
+            <span
+              className={`px-2.5 py-1 rounded-md text-xs font-bold tabular-nums ${
+                remainingMs <= 60000
+                  ? 'bg-red-600 text-white animate-pulse'
+                  : remainingMs <= 5 * 60000
+                    ? 'bg-amber-600 text-white'
+                    : 'bg-jobjen-surface text-jobjen-text border border-jobjen-border'
+              }`}
+              title="Time remaining"
+            >
+              ⏱ {formatRemaining(remainingMs)}
+            </span>
+          ) : null}
           <button
-            onClick={handleSubmit}
+            onClick={() => handleSubmit()}
             disabled={phase === 'submitting'}
             className="jobjen-btn-success px-4 py-1.5 text-xs font-semibold rounded-md disabled:opacity-60"
           >

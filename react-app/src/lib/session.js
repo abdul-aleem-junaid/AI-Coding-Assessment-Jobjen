@@ -16,6 +16,7 @@ let state = {
   sessionId: "", // set after /apply/technical/start
   candidateName: "",
   question: null, // { questionId, name, description, files, timeLimit, ... }
+  deadlineAt: null, // ISO instant the time budget expires (null = no limit)
 };
 
 const listeners = new Set();

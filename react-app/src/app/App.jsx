@@ -130,8 +130,8 @@ export default function App() {
     setStarting(true);
     try {
       const res = await api.post("/apply/technical/start", { token });
-      const { sessionId, candidateName, question } = res.data ?? {};
-      setSession({ sessionId, candidateName, question });
+      const { sessionId, candidateName, question, deadlineAt } = res.data ?? {};
+      setSession({ sessionId, candidateName, question, deadlineAt });
       setStartError("");
       navigate("/preflight");
     } catch (err) {
