@@ -278,14 +278,16 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
       {recordingDown && phase !== 'done' && (
         <div className="fixed inset-0 z-[10002] bg-black/85 flex flex-col items-center justify-center gap-5 font-sans px-6 text-center">
           <h2 className="text-[1.5rem] font-bold text-jobjen-text">
-            Screen recording stopped
+            Screen recording interrupted
           </h2>
           <p className="text-sm text-jobjen-muted max-w-[460px] leading-relaxed">
             Your entire screen must be shared and recorded for the whole
             assessment.{' '}
             {recordingDown === 'start-failed'
               ? 'We could not start the recording.'
-              : 'The screen share was stopped.'}{' '}
+              : recordingDown === 'upload-failed'
+                ? 'Your recording could not be uploaded — please check your internet connection.'
+                : 'The screen share was stopped.'}{' '}
             Please re-share your <strong>entire screen</strong> to continue —
             your progress is safe.
           </p>

@@ -138,7 +138,10 @@ export class ScreenRecorder {
     this.chain = this.chain.then(() => this._flush(isFinal)).catch((err) => {
       this.failed = true;
       // Swallow so the chain keeps resolving; surfaced via this.failed.
-      console.error("[screenRecorder] part upload failed:", err);
+      console.error("[screenRecorder] part upload failed permanently:", err);
+      // Warn the candidate (and let them recover) instead of silently
+      // submitting a truncated recording. No-op once stopped (during submit).
+      this._notifyLost("upload-failed");
     });
     return this.chain;
   }
@@ -152,26 +155,64 @@ export class ScreenRecorder {
     this.pendingBytes = 0;
 
     const partNumber = this.partNumber++;
-    const urlRes = await api.post("/technical/screen/multipart/part-url", {
-      sessionId: this.sessionId,
-      partNumber,
-    });
-    const uploadUrl = urlRes.data?.uploadUrl;
-    if (!uploadUrl) throw new Error("No upload URL returned for part.");
+    await this._uploadPartWithRetry(partNumber, blob);
+  }
 
-    // Direct PUT to S3 — outside the crypto axios. Read the ETag the server
-    // needs to assemble the object (requires S3 CORS to expose ETag).
-    const put = await fetch(uploadUrl, { method: "PUT", body: blob });
-    if (!put.ok) throw new Error(`S3 part PUT failed (HTTP ${put.status})`);
-    const etag = put.headers.get("ETag") ?? put.headers.get("etag");
-    if (!etag) throw new Error("S3 did not return an ETag (check CORS expose).");
+  /**
+   * Upload ONE part, with bounded retries + exponential backoff. A transient
+   * failure (network blip, 5xx, or a presigned URL that EXPIRED while earlier
+   * parts drained ahead of this one) must not poison the whole recording: the
+   * server keeps only the contiguous run from part 1, so a single dropped
+   * mid-stream part would otherwise truncate everything after it. We re-mint a
+   * FRESH presigned URL on every attempt so an expired URL self-heals.
+   */
+  async _uploadPartWithRetry(partNumber, blob) {
+    const MAX_ATTEMPTS = 5;
+    let lastErr;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        // Fresh presigned URL each attempt (handles an expired one).
+        const urlRes = await api.post("/technical/screen/multipart/part-url", {
+          sessionId: this.sessionId,
+          partNumber,
+        });
+        const uploadUrl = urlRes.data?.uploadUrl;
+        if (!uploadUrl) throw new Error("No upload URL returned for part.");
 
-    await api.post("/technical/screen/multipart/part-done", {
-      sessionId: this.sessionId,
-      partNumber,
-      etag,
-      size: blob.size,
-    });
+        // Direct PUT to S3 — outside the crypto axios. Read the ETag the
+        // server needs to assemble the object (requires S3 CORS to expose it).
+        const put = await fetch(uploadUrl, { method: "PUT", body: blob });
+        if (!put.ok) throw new Error(`S3 part PUT failed (HTTP ${put.status})`);
+        const etag = put.headers.get("ETag") ?? put.headers.get("etag");
+        if (!etag) {
+          throw new Error("S3 did not return an ETag (check CORS expose).");
+        }
+
+        await api.post("/technical/screen/multipart/part-done", {
+          sessionId: this.sessionId,
+          partNumber,
+          etag,
+          size: blob.size,
+        });
+        return; // success
+      } catch (err) {
+        lastErr = err;
+        if (attempt < MAX_ATTEMPTS) {
+          // Backoff between the 5 attempts: 0.5s, 1s, 2s, 4s.
+          const delayMs = Math.min(4000, 500 * 2 ** (attempt - 1));
+          console.warn(
+            `[screenRecorder] part ${partNumber} attempt ${attempt}/${MAX_ATTEMPTS} failed; retrying in ${delayMs}ms`,
+            err,
+          );
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+      }
+    }
+    throw new Error(
+      `Part ${partNumber} failed after ${MAX_ATTEMPTS} attempts: ${
+        lastErr && lastErr.message ? lastErr.message : "unknown error"
+      }`,
+    );
   }
 
   /**
