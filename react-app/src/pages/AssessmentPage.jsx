@@ -11,7 +11,7 @@ import ChatPanel      from '../components/chat/ChatPanel'
 import NotebookFrame  from '../components/notebook/NotebookFrame'
 import PiPCamera      from '../components/camera/PiPCamera'
 import { useSession, getSession } from '../lib/session'
-import { ScreenRecorder } from '../lib/screenRecorder'
+import { ScreenRecorder, acquireScreenStream } from '../lib/screenRecorder'
 import { exportAndUploadNotebooks } from '../lib/notebookExport'
 import { importQuestionFiles } from '../lib/notebookImport'
 import api from '../lib/api'
@@ -36,8 +36,12 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
   const [submitStep, setSubmitStep] = useState('')
   const [submitError, setSubmitError] = useState('')
   const [recWarning, setRecWarning] = useState('')
+  const [recordingDown, setRecordingDown] = useState('') // '' = healthy; else a reason
+  const [reSharing, setReSharing] = useState(false)
+  const [reshareError, setReshareError] = useState('')
 
   const recorderRef = useRef(null)
+  const startedRef = useRef(false)
   const importedRef = useRef(false)
 
   // Seed the question's attachment files into the JupyterLite workspace once, so
@@ -53,25 +57,36 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
     })
   }, [])
 
-  // Start the screen+mic recording once, on mount.
-  useEffect(() => {
-    let cancelled = false
-    // Guard against React StrictMode's double-invoke (dev) starting two recorders.
-    if (recorderRef.current) return
+  // Create a recorder for a screen stream and start it. Shared by the initial
+  // mount and the re-share recovery. onLost fires if the candidate ends the
+  // screen share (browser "Stop sharing" pill) or the recorder dies — we then
+  // block the assessment and force a re-share, never continuing unrecorded.
+  const startRecording = async (screenStream) => {
     const { sessionId } = getSession()
-    const screen = screenStreamRef.current
-    const mic = streamRef.current
-    if (!sessionId || !screen || !mic) return
-
-    const recorder = new ScreenRecorder({ sessionId, screenStream: screen, micStream: mic })
-    recorderRef.current = recorder
-    recorder.start().catch((err) => {
-      if (cancelled) return
-      console.error('[assessment] recording failed to start:', err)
-      setRecWarning('Screen recording could not start. You can still complete and submit the assessment.')
+    if (!sessionId || !screenStream) throw new Error('Missing session or screen stream')
+    const recorder = new ScreenRecorder({
+      sessionId,
+      screenStream,
+      micStream: streamRef.current,
+      onLost: () => setRecordingDown('screen-share-stopped'),
     })
-    return () => { cancelled = true }
-  }, [streamRef, screenStreamRef])
+    recorderRef.current = recorder
+    await recorder.start()
+  }
+
+  // Start the screen+mic recording once, on mount. If it can't start, block the
+  // assessment and make the candidate re-share rather than continuing unrecorded.
+  useEffect(() => {
+    if (startedRef.current) return // guard React StrictMode double-invoke
+    const { sessionId } = getSession()
+    if (!sessionId || !screenStreamRef.current || !streamRef.current) return
+    startedRef.current = true
+    startRecording(screenStreamRef.current).catch((err) => {
+      console.error('[assessment] recording failed to start:', err)
+      setRecordingDown('start-failed')
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Tab-switch / window-blur detection
   useEffect(() => {
@@ -88,8 +103,38 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
     }
   }, [])
 
+  // Re-acquire the entire screen and resume recording after a loss / start
+  // failure. Triggered by a click (getDisplayMedia needs a user gesture).
+  const handleReshare = async () => {
+    if (reSharing) return
+    setReSharing(true)
+    setReshareError('')
+    try {
+      // Disarm the old (dead) recorder so stopping its tracks can't re-fire the
+      // "lost" flow, then acquire a fresh FULL-screen share and resume.
+      recorderRef.current?.dispose?.()
+      const screen = await acquireScreenStream()
+      screenStreamRef.current?.getTracks().forEach((t) => t.stop())
+      screenStreamRef.current = screen
+      await startRecording(screen)
+      setRecordingDown('')
+    } catch (err) {
+      setReshareError(
+        err?.code === 'ENTIRE_SCREEN_REQUIRED'
+          ? 'You must share your ENTIRE screen — not a single tab or window.'
+          : 'Screen sharing was blocked or cancelled. Please allow it to continue.',
+      )
+    } finally {
+      setReSharing(false)
+    }
+  }
+
   const handleSubmit = async () => {
     if (phase === 'submitting') return
+    if (recordingDown) {
+      setSubmitError('Your screen is not being recorded. Please re-share your entire screen before submitting.')
+      return
+    }
     const ok = window.confirm('Submit your assessment? You will not be able to make further changes.')
     if (!ok) return
 
@@ -225,6 +270,37 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
       {submitError && (
         <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[10001] bg-red-800 text-white text-sm font-semibold px-5 py-3 rounded-xl shadow-lg font-sans">
           {submitError}
+        </div>
+      )}
+
+      {/* Recording stopped / failed — BLOCKING. Recording is mandatory, so the
+          candidate cannot continue or submit until they re-share their screen. */}
+      {recordingDown && phase !== 'done' && (
+        <div className="fixed inset-0 z-[10002] bg-black/85 flex flex-col items-center justify-center gap-5 font-sans px-6 text-center">
+          <h2 className="text-[1.5rem] font-bold text-jobjen-text">
+            Screen recording stopped
+          </h2>
+          <p className="text-sm text-jobjen-muted max-w-[460px] leading-relaxed">
+            Your entire screen must be shared and recorded for the whole
+            assessment.{' '}
+            {recordingDown === 'start-failed'
+              ? 'We could not start the recording.'
+              : 'The screen share was stopped.'}{' '}
+            Please re-share your <strong>entire screen</strong> to continue —
+            your progress is safe.
+          </p>
+          <button
+            onClick={handleReshare}
+            disabled={reSharing}
+            className="jobjen-btn-success px-6 py-3 text-sm font-semibold rounded-xl disabled:opacity-60"
+          >
+            {reSharing ? 'Waiting for screen share…' : 'Re-share my screen & resume'}
+          </button>
+          {reshareError && (
+            <p className="text-red-400 text-xs max-w-[440px] leading-relaxed">
+              {reshareError}
+            </p>
+          )}
         </div>
       )}
     </div>

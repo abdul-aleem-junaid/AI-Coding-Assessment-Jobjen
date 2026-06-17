@@ -36,17 +36,42 @@ function pickMimeType() {
  */
 export async function acquireScreenStream() {
   const stream = await navigator.mediaDevices.getDisplayMedia({
-    video: { frameRate: 10 },
+    // `displaySurface: "monitor"` is only a HINT — the browser still lets the
+    // user pick a tab/window — so we validate the actual choice below. The
+    // other hints nudge the picker toward whole-screen and away from offering
+    // "this tab".
+    video: { frameRate: 10, displaySurface: "monitor" },
     audio: false,
+    monitorTypeSurfaces: "include",
+    surfaceSwitching: "exclude",
+    selfBrowserSurface: "exclude",
   });
+
+  // Enforce a FULL-SCREEN share. "monitor" = an entire display; "window" or
+  // "browser" (a single app window / tab) would leave the rest of the screen
+  // unmonitored, defeating the proctoring. We can only reject when the browser
+  // reports the surface (Chromium does; some browsers don't) — when it's
+  // unknown we allow it rather than block a candidate on a capability gap.
+  const track = stream.getVideoTracks()[0];
+  const surface = track?.getSettings?.().displaySurface;
+  if (surface && surface !== "monitor") {
+    stream.getTracks().forEach((t) => t.stop());
+    const err = new Error("ENTIRE_SCREEN_REQUIRED");
+    err.code = "ENTIRE_SCREEN_REQUIRED";
+    throw err;
+  }
   return stream;
 }
 
 export class ScreenRecorder {
-  constructor({ sessionId, screenStream, micStream }) {
+  constructor({ sessionId, screenStream, micStream, onLost }) {
     this.sessionId = sessionId;
     this.screenStream = screenStream;
     this.micStream = micStream;
+    // Called once if the screen share ends mid-session (candidate clicks "Stop
+    // sharing" / OS revoke) or the recorder errors. The assessment page uses it
+    // to block the UI and force a re-share.
+    this.onLost = onLost;
 
     this.recorder = null;
     this.mimeType = pickMimeType();
@@ -58,6 +83,7 @@ export class ScreenRecorder {
     this.startedAt = 0;
     this.stopped = false;
     this.failed = false;
+    this.lostNotified = false;
   }
 
   /** Init the multipart upload and start recording. */
@@ -82,6 +108,18 @@ export class ScreenRecorder {
     ]);
 
     this.recorder = new MediaRecorder(combined, { mimeType: this.mimeType });
+
+    // Detect the candidate ending the screen share (browser "Stop sharing"
+    // pill / OS revoke) or a recorder failure. We must NOT silently continue
+    // unrecorded — onLost lets the assessment page pause and force a re-share.
+    const screenTrack = this.screenStream.getVideoTracks()[0];
+    if (screenTrack) {
+      screenTrack.addEventListener("ended", () =>
+        this._notifyLost("screen-share-ended"),
+      );
+    }
+    this.recorder.onerror = () => this._notifyLost("recorder-error");
+
     this.recorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) {
         this.pending.push(e.data);
@@ -179,5 +217,27 @@ export class ScreenRecorder {
     });
 
     return { durationSec, completed: true };
+  }
+
+  /** Fire the onLost callback exactly once (ignored after a deliberate stop). */
+  _notifyLost(reason) {
+    if (this.stopped || this.lostNotified) return;
+    this.lostNotified = true;
+    try {
+      if (this.onLost) this.onLost(reason);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /**
+   * Permanently disarm this recorder. Used when replacing it on a re-share:
+   * makes _notifyLost() and stop() inert so stopping the OLD (dead) screen
+   * tracks can't re-trigger the "recording lost" flow on the instance we're
+   * discarding.
+   */
+  dispose() {
+    this.stopped = true;
+    this.onLost = null;
   }
 }

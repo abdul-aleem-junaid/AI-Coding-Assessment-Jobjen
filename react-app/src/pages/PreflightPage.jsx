@@ -62,6 +62,7 @@ export default function PreflightPage({ streamRef, screenStreamRef, onBegin }) {
   const [permission, setPermission] = useState("idle"); // idle | requesting | granted | denied
   const [micLevel, setMicLevel] = useState(0);
   const [screenState, setScreenState] = useState("idle"); // idle | requesting | error
+  const [screenError, setScreenError] = useState("");
 
   const preflightVideoRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -122,13 +123,19 @@ export default function PreflightPage({ streamRef, screenStreamRef, onBegin }) {
   // user gesture). We record the SCREEN + mic; the webcam stays a live PiP.
   const beginAssessment = async () => {
     setScreenState("requesting");
+    setScreenError("");
     try {
       const screen = await acquireScreenStream();
       screenStreamRef.current = screen;
       setScreenState("idle");
       onBegin();
-    } catch {
+    } catch (err) {
       setScreenState("error");
+      setScreenError(
+        err?.code === "ENTIRE_SCREEN_REQUIRED"
+          ? "You must share your ENTIRE screen — not a single tab or window. Click again and choose your full screen / monitor."
+          : "Screen sharing was denied or cancelled. You must share your full screen to continue.",
+      );
     }
   };
 
@@ -260,11 +267,8 @@ export default function PreflightPage({ streamRef, screenStreamRef, onBegin }) {
               <p className="text-xs text-jobjen-subtle mt-2 text-center leading-relaxed">
                 You'll be asked to share your <strong>entire screen</strong> —
                 this is recorded for the duration of the assessment.
-                {screenState === "error" && (
-                  <span className="block text-red-400 mt-1">
-                    Screen sharing was denied or cancelled. You must share your
-                    full screen to continue.
-                  </span>
+                {screenState === "error" && screenError && (
+                  <span className="block text-red-400 mt-1">{screenError}</span>
                 )}
               </p>
             </>
