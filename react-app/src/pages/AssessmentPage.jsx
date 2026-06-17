@@ -122,6 +122,19 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
     }
   }, [])
 
+  // Warn before an accidental reload / tab-close while the assessment is still
+  // live, so a misclick (Ctrl-R, closing the tab) doesn't wipe the in-progress
+  // recording + notebook work. Disarmed once submitted (phase === 'done').
+  useEffect(() => {
+    if (phase === 'done') return
+    const onBeforeUnload = (e) => {
+      e.preventDefault()
+      e.returnValue = '' // some browsers require a set returnValue to prompt
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [phase])
+
   // Re-acquire the entire screen and resume recording after a loss / start
   // failure. Triggered by a click (getDisplayMedia needs a user gesture).
   const handleReshare = async () => {
