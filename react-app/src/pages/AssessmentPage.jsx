@@ -40,6 +40,7 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
   const session = useSession()
   const [chatOpen, setChatOpen] = useState(true)
   const [blurred,  setBlurred]  = useState(false)
+  const armedRef = useRef(false) // blur-detector armed only after the page holds focus once
   const [phase, setPhase] = useState('active') // active | submitting | done
   const [submitStep, setSubmitStep] = useState('')
   const [submitError, setSubmitError] = useState('')
@@ -144,11 +145,22 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Tab-switch / window-blur detection
+  // Tab-switch / window-blur detection.
+  //
+  // Armed only once the page has genuinely held focus. Without this the overlay
+  // fires a false positive on first load: the candidate lands here straight from
+  // the screen-share picker, so OS focus is on Chrome's "Stop sharing" bar (not
+  // the page) — `document.hasFocus()` is false — and the JupyterLite iframe
+  // grabbing focus on load fires a parent `blur`, which the detector can't tell
+  // apart from a real tab-switch. The editor then looks blurred until the
+  // candidate clicks it. Gating on `armed` ignores that initial unfocused state
+  // while keeping real tab-switch detection intact once focus has been held.
   useEffect(() => {
-    const onBlur       = () => setTimeout(() => { if (!document.hasFocus()) setBlurred(true) }, 0)
-    const onFocus      = () => setBlurred(false)
-    const onVisibility = () => setBlurred(document.hidden)
+    armedRef.current = document.hasFocus()
+    const arm = () => { armedRef.current = true; setBlurred(false) }
+    const onBlur       = () => setTimeout(() => { if (armedRef.current && !document.hasFocus()) setBlurred(true) }, 0)
+    const onFocus      = arm
+    const onVisibility = () => { if (armedRef.current) setBlurred(document.hidden) }
     window.addEventListener('blur', onBlur)
     window.addEventListener('focus', onFocus)
     document.addEventListener('visibilitychange', onVisibility)
@@ -337,7 +349,10 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
 
         {/* JupyterLite iframe — fills remaining space */}
         <div className="h-full min-w-0 flex-1">
-          <NotebookFrame onBlur={() => setBlurred(true)} onFocus={() => setBlurred(false)} />
+          <NotebookFrame
+            onBlur={() => { if (armedRef.current) setBlurred(true) }}
+            onFocus={() => { armedRef.current = true; setBlurred(false) }}
+          />
         </div>
 
         {/* AI chat panel — fixed 300 px */}
