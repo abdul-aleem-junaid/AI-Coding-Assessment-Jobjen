@@ -103,15 +103,47 @@ async function uploadOne(sessionId, file) {
 }
 
 /**
+ * Upload one notebook with bounded exponential-backoff retry (M22). A single
+ * transient blip (5xx, dropped wifi, expired presign) on one file used to
+ * reject the WHOLE batch and bounce submit, discarding every already-uploaded
+ * file's work. Each attempt re-presigns (fresh URL + key) so an expired URL
+ * self-heals; the backend completes idempotently by key.
+ */
+async function uploadOneWithRetry(sessionId, file) {
+  const MAX_ATTEMPTS = 3;
+  let lastErr;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      return await uploadOne(sessionId, file);
+    } catch (err) {
+      lastErr = err;
+      if (attempt < MAX_ATTEMPTS) {
+        const delayMs = Math.min(4000, 500 * 2 ** (attempt - 1));
+        console.warn(
+          `[notebookExport] upload of "${file.name}" attempt ${attempt}/${MAX_ATTEMPTS} failed; retrying in ${delayMs}ms`,
+          err,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+  throw new Error(
+    `Failed to upload "${file.name}" after ${MAX_ATTEMPTS} attempts: ${
+      lastErr && lastErr.message ? lastErr.message : "unknown error"
+    }`,
+  );
+}
+
+/**
  * Export every workspace notebook and upload them all. Returns the uploaded
- * file descriptors. Throws if the export bridge fails; individual upload
- * failures reject the whole batch (caller surfaces a retry).
+ * file descriptors. Throws if the export bridge fails; individual uploads retry
+ * a few times before the batch rejects (caller surfaces a retry).
  */
 export async function exportAndUploadNotebooks(sessionId) {
   const files = await requestNotebooks();
   const uploaded = [];
   for (const f of files) {
-    uploaded.push(await uploadOne(sessionId, f));
+    uploaded.push(await uploadOneWithRetry(sessionId, f));
   }
   return uploaded;
 }

@@ -84,6 +84,23 @@ export class ScreenRecorder {
     this.stopped = false;
     this.failed = false;
     this.lostNotified = false;
+
+    // Backpressure (M13): on a slow uplink, captured chunks pile up faster than
+    // they upload and the buffered Blob chain grows without bound — the tab can
+    // OOM and finalize stalls. We cap how many parts may be queued/in-flight and
+    // PAUSE capture while the backlog is deep, resuming once it drains. A short
+    // capture gap on a struggling connection beats crashing the assessment.
+    this.maxInFlightParts = 3;
+    this.inFlightParts = 0;
+    this.paused = false;
+
+    // Runaway-recording cap (M14): bounds a single recording segment's size on
+    // an untimed question (timed ones are already bounded by the H8 deadline
+    // auto-submit). On hit, we treat it like a share-loss so the page forces a
+    // fresh re-share (a new, separate upload). Generous so it never fires in a
+    // normal assessment.
+    this.maxDurationMs = 3 * 60 * 60 * 1000;
+    this.maxDurationTimer = null;
   }
 
   /** Init the multipart upload and start recording. */
@@ -132,18 +149,51 @@ export class ScreenRecorder {
     this.startedAt = Date.now();
     // 4s timeslice so chunks arrive steadily and we can upload mid-session.
     this.recorder.start(4000);
+    this.maxDurationTimer = setTimeout(
+      () => this._notifyLost("max-duration"),
+      this.maxDurationMs,
+    );
   }
 
   _enqueueFlush(isFinal) {
-    this.chain = this.chain.then(() => this._flush(isFinal)).catch((err) => {
-      this.failed = true;
-      // Swallow so the chain keeps resolving; surfaced via this.failed.
-      console.error("[screenRecorder] part upload failed permanently:", err);
-      // Warn the candidate (and let them recover) instead of silently
-      // submitting a truncated recording. No-op once stopped (during submit).
-      this._notifyLost("upload-failed");
-    });
+    this.inFlightParts += 1;
+    this._applyBackpressure();
+    this.chain = this.chain
+      .then(() => this._flush(isFinal))
+      .catch((err) => {
+        this.failed = true;
+        // Swallow so the chain keeps resolving; surfaced via this.failed.
+        console.error("[screenRecorder] part upload failed permanently:", err);
+        // Warn the candidate (and let them recover) instead of silently
+        // submitting a truncated recording. No-op once stopped (during submit).
+        this._notifyLost("upload-failed");
+      })
+      .finally(() => {
+        this.inFlightParts -= 1;
+        this._applyBackpressure();
+      });
     return this.chain;
+  }
+
+  /**
+   * Pause capture while the upload backlog is too deep, resume once it drains
+   * (M13). No-op during/after stop (the final tail flush must not pause) and
+   * when the recorder isn't actively recording.
+   */
+  _applyBackpressure() {
+    if (this.stopped || !this.recorder) return;
+    const overloaded = this.inFlightParts >= this.maxInFlightParts;
+    try {
+      if (overloaded && !this.paused && this.recorder.state === "recording") {
+        this.recorder.pause();
+        this.paused = true;
+      } else if (!overloaded && this.paused && this.recorder.state === "paused") {
+        this.recorder.resume();
+        this.paused = false;
+      }
+    } catch {
+      /* pause/resume unsupported — fall back to unbounded (prior behaviour) */
+    }
   }
 
   async _flush(isFinal) {
@@ -224,9 +274,24 @@ export class ScreenRecorder {
       return { durationSec: 0, completed: false };
     }
     this.stopped = true;
+    if (this.maxDurationTimer) {
+      clearTimeout(this.maxDurationTimer);
+      this.maxDurationTimer = null;
+    }
     const durationSec = this.startedAt
       ? (Date.now() - this.startedAt) / 1000
       : 0;
+
+    // Make sure a backpressure pause doesn't strand the tail: resume so the
+    // final dataavailable fires before we stop the recorder.
+    if (this.recorder && this.recorder.state === "paused") {
+      try {
+        this.recorder.resume();
+      } catch {
+        /* ignore */
+      }
+      this.paused = false;
+    }
 
     // Stop the recorder and wait for the final dataavailable + onstop.
     if (this.recorder && this.recorder.state !== "inactive") {
@@ -280,5 +345,9 @@ export class ScreenRecorder {
   dispose() {
     this.stopped = true;
     this.onLost = null;
+    if (this.maxDurationTimer) {
+      clearTimeout(this.maxDurationTimer);
+      this.maxDurationTimer = null;
+    }
   }
 }
