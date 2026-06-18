@@ -65,7 +65,9 @@ export default function ChatThread() {
       <ThreadPrimitive.Viewport className="flex-1 overflow-y-auto p-3 flex flex-col gap-2.5 min-h-0">
         <ThreadPrimitive.Empty>
           <p className="text-[0.8rem] text-jobjen-subtle leading-[1.55] py-3 px-1 text-center">
-            Hi! I&apos;m your AI assistant. Ask me anything about the assessment.
+            Hi! I&apos;m your AI coding coach. Ask me to clarify the problem,
+            explain a concept, or help debug an error. I&apos;ll guide you with
+            hints — but I can&apos;t write the solution for you.
           </p>
         </ThreadPrimitive.Empty>
         <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />

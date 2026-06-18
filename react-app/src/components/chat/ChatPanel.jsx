@@ -1,10 +1,15 @@
 // src/components/chat/ChatPanel.jsx
 //
-// AI assistant side panel.
-// INTEGRATION POINT: Replace `mockAdapter` with a real ChatModelAdapter
-// when the backend is ready — only the `useLocalRuntime` call needs updating.
+// AI assistant side panel — a coach-only coding helper the candidate can chat
+// with while solving the assigned problem. Talks to the backend
+// `POST /technical/assistant` endpoint through the encrypted `api` layer (which
+// injects the single-use technical token + the crypto envelope automatically).
+// The server binds the chat to the session's assigned question and hard-bounds
+// the assistant to coaching (it never writes the solution).
 
 import { AssistantRuntimeProvider, useLocalRuntime } from '@assistant-ui/react'
+import api from '../../lib/api'
+import { getSession } from '../../lib/session'
 import ChatThread from './ChatThread'
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
@@ -15,19 +20,75 @@ const CloseIcon = () => (
   </svg>
 )
 
-// ── Mock adapter (replace with real adapter when backend is ready) ────────────
-const mockAdapter = {
-  async *run({ abortSignal }) {
-    await new Promise((resolve) => setTimeout(resolve, 600))
-    yield {
-      content: [{ type: 'text', text: 'This is a placeholder reply. Backend coming soon.' }],
+// Server limits mirrored here so we never trip a 400 (per-turn MaxLength 4000,
+// array ArrayMaxSize 40 in AssistantChatDto).
+const MAX_TURN_CHARS = 4000
+const MAX_TURNS = 40
+
+/** Flatten an @assistant-ui message's content parts into plain text. */
+function partsToText(content) {
+  if (typeof content === 'string') return content.trim()
+  if (Array.isArray(content)) {
+    return content
+      .filter((p) => p && p.type === 'text' && typeof p.text === 'string')
+      .map((p) => p.text)
+      .join('\n')
+      .trim()
+  }
+  return ''
+}
+
+// ── Real adapter — calls the coach-only backend assistant ─────────────────────
+const assistantAdapter = {
+  async *run({ messages, abortSignal }) {
+    const { sessionId } = getSession()
+    if (!sessionId) {
+      yield {
+        content: [
+          {
+            type: 'text',
+            text: "I can't reach your session right now. Please reload the page and try again.",
+          },
+        ],
+      }
+      return
+    }
+
+    // Build the bounded turn history the backend expects (oldest-first, last
+    // turn = the candidate). Drop empties; clamp each turn + the count.
+    const history = (messages ?? [])
+      .map((m) => ({ role: m.role, text: partsToText(m.content) }))
+      .filter(
+        (m) => (m.role === 'user' || m.role === 'assistant') && m.text,
+      )
+      .map((m) => ({ role: m.role, text: m.text.slice(0, MAX_TURN_CHARS) }))
+      .slice(-MAX_TURNS)
+
+    if (!history.length || history[history.length - 1].role !== 'user') return
+
+    try {
+      const res = await api.post(
+        '/technical/assistant',
+        { sessionId, messages: history },
+        { signal: abortSignal },
+      )
+      const reply =
+        res?.data?.reply ||
+        "Sorry, I couldn't come up with a reply. Please try again."
+      yield { content: [{ type: 'text', text: reply }] }
+    } catch (err) {
+      if (err?.code === 'ERR_CANCELED' || abortSignal?.aborted) return
+      const msg =
+        err?.response?.data?.message ||
+        'The AI assistant is temporarily unavailable. Please try again in a moment.'
+      yield { content: [{ type: 'text', text: msg }] }
     }
   },
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
 export default function ChatPanel({ onClose }) {
-  const runtime = useLocalRuntime(mockAdapter)
+  const runtime = useLocalRuntime(assistantAdapter)
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
