@@ -164,19 +164,11 @@ export default function ChatThread() {
           </div>
         </ThreadPrimitive.Empty>
 
+        {/* The in-bubble `MessagePrimitive.If running` dots (see AssistantMessage)
+            are the single source of the "typing" state — the local runtime mounts
+            the assistant message immediately, so no separate thread-level fallback
+            is needed (a second one here caused two loaders). */}
         <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
-
-        {/* Typing indicator for the gap before the assistant message mounts. */}
-        <ThreadPrimitive.If running>
-          <ThreadPrimitive.If empty={false}>
-            <div className="flex w-full justify-start gap-2">
-              <AssistantAvatar />
-              <div className="px-3.5 py-2.5 rounded-2xl rounded-bl-md bg-jobjen-surface border border-jobjen-border">
-                <TypingDots />
-              </div>
-            </div>
-          </ThreadPrimitive.If>
-        </ThreadPrimitive.If>
       </ThreadPrimitive.Viewport>
 
       {/* Composer */}
