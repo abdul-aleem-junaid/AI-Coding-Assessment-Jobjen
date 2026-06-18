@@ -20,45 +20,68 @@ export function getNotebookWindow() {
   return notebookWindow;
 }
 
+/** Wait until NotebookFrame has registered the iframe window. On a page reload
+ *  the iframe remounts and submit can fire before its `onLoad` registers the
+ *  window — without this the export would reject immediately with "frame not
+ *  ready" and the upload would fail. */
+function waitForNotebookWindow(timeoutMs = 30000) {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const tick = () => {
+      if (notebookWindow) return resolve(notebookWindow);
+      if (Date.now() - start > timeoutMs) {
+        return reject(new Error("Notebook frame did not load in time."));
+      }
+      setTimeout(tick, 200);
+    };
+    tick();
+  });
+}
+
 /**
  * Ask the JupyterLite iframe for all workspace notebooks.
  * Resolves to [{ name, content }] (content = parsed .ipynb JSON).
+ *
+ * Waits for the iframe window first, then for the in-iframe export bridge —
+ * which itself waits up to 30s for the workspace to boot (see patch-build.cjs
+ * "Patch 8") — so an export fired right after a reload (e.g. an immediate
+ * auto-submit when the deadline lapsed mid-reload) waits for the editor instead
+ * of failing. The reply timeout must exceed the bridge's internal 30s wait.
  */
-export function requestNotebooks(timeoutMs = 20000) {
+export function requestNotebooks(timeoutMs = 40000) {
   return new Promise((resolve, reject) => {
-    const win = notebookWindow;
-    if (!win) {
-      reject(new Error("Notebook frame is not ready."));
-      return;
-    }
-    const id =
-      (crypto.randomUUID && crypto.randomUUID()) ||
-      String(Date.now() + Math.random());
+    waitForNotebookWindow()
+      .then((win) => {
+        const id =
+          (crypto.randomUUID && crypto.randomUUID()) ||
+          String(Date.now() + Math.random());
 
-    const onMessage = (e) => {
-      if (e.source !== win) return;
-      const d = e.data;
-      if (!d || d.type !== "jobjen:notebooks" || d.id !== id) return;
-      cleanup();
-      if (d.error && (!d.files || d.files.length === 0)) {
-        reject(new Error(d.error));
-        return;
-      }
-      resolve(Array.isArray(d.files) ? d.files : []);
-    };
+        const onMessage = (e) => {
+          if (e.source !== win) return;
+          const d = e.data;
+          if (!d || d.type !== "jobjen:notebooks" || d.id !== id) return;
+          cleanup();
+          if (d.error && (!d.files || d.files.length === 0)) {
+            reject(new Error(d.error));
+            return;
+          }
+          resolve(Array.isArray(d.files) ? d.files : []);
+        };
 
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(new Error("Timed out exporting notebooks from the workspace."));
-    }, timeoutMs);
+        const timer = setTimeout(() => {
+          cleanup();
+          reject(new Error("Timed out exporting notebooks from the workspace."));
+        }, timeoutMs);
 
-    function cleanup() {
-      clearTimeout(timer);
-      window.removeEventListener("message", onMessage);
-    }
+        function cleanup() {
+          clearTimeout(timer);
+          window.removeEventListener("message", onMessage);
+        }
 
-    window.addEventListener("message", onMessage);
-    win.postMessage({ type: "jobjen:exportNotebooks", id }, "*");
+        window.addEventListener("message", onMessage);
+        win.postMessage({ type: "jobjen:exportNotebooks", id }, "*");
+      })
+      .catch(reject);
   });
 }
 

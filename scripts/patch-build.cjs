@@ -281,6 +281,32 @@ const NOTEBOOK_EXPORT_SCRIPT = `
           return window.jupyterapp || window.jupyterlab || null;
         }
 
+        /* Wait for the JupyterLite app + Contents service to be ready, rather
+           than failing fast. A submit fired right after a page reload (e.g. the
+           deadline lapsed during the reload, triggering an immediate auto-submit)
+           reaches here before the freshly-mounted iframe has booted; without this
+           the export would reply 'workspace not ready' and the upload would fail
+           even though the workspace is seconds from ready. */
+        function waitForApp(timeoutMs) {
+          var start = Date.now();
+          return new Promise(function (resolve, reject) {
+            (function tick() {
+              var app = getApp();
+              if (app && app.serviceManager && app.serviceManager.contents) {
+                app.serviceManager.ready
+                  ? app.serviceManager.ready.then(function () { resolve(app); }, function () { resolve(app); })
+                  : resolve(app);
+                return;
+              }
+              if (Date.now() - start > (timeoutMs || 30000)) {
+                reject(new Error('Notebook workspace is not ready.'));
+                return;
+              }
+              setTimeout(tick, 250);
+            })();
+          });
+        }
+
         async function listNotebooks(contents, path) {
           var model = await contents.get(path, { content: true });
           var out = [];
@@ -298,10 +324,7 @@ const NOTEBOOK_EXPORT_SCRIPT = `
         }
 
         async function collect() {
-          var app = getApp();
-          if (!app || !app.serviceManager || !app.serviceManager.contents) {
-            throw new Error('Notebook workspace is not ready yet.');
-          }
+          var app = await waitForApp(30000);
           var contents = app.serviceManager.contents;
           /* Persist any unsaved editor state first, best-effort. */
           try {
