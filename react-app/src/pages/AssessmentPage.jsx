@@ -36,9 +36,29 @@ function formatRemaining(ms) {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
+// AI panel resize bounds. The upper bound is also capped at runtime so the
+// editor never shrinks below ~380px (see clampChatWidth).
+const CHAT_MIN_WIDTH = 280
+const CHAT_MAX_WIDTH = 760
+
+/** Clamp a desired panel width to [MIN, MAX] and keep the editor usable. */
+function clampChatWidth(px) {
+  const runtimeMax = Math.max(
+    CHAT_MIN_WIDTH,
+    Math.min(CHAT_MAX_WIDTH, window.innerWidth - 380),
+  )
+  return Math.round(Math.min(runtimeMax, Math.max(CHAT_MIN_WIDTH, px)))
+}
+
 export default function AssessmentPage({ streamRef, screenStreamRef }) {
   const session = useSession()
   const [chatOpen, setChatOpen] = useState(true)
+  // Candidate-resizable AI panel width (px), persisted across reloads.
+  const [chatWidth, setChatWidth] = useState(() => {
+    const saved = Number(localStorage.getItem('jobjen.chatWidth'))
+    return saved >= CHAT_MIN_WIDTH && saved <= CHAT_MAX_WIDTH ? saved : 340
+  })
+  const [resizing, setResizing] = useState(false)
   const [blurred,  setBlurred]  = useState(false)
   const armedRef = useRef(false) // blur-detector armed only after the page holds focus once
   const [phase, setPhase] = useState('active') // active | submitting | done
@@ -169,6 +189,43 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
       window.removeEventListener('focus', onFocus)
       document.removeEventListener('visibilitychange', onVisibility)
     }
+  }, [])
+
+  // Persist the candidate's chosen AI-panel width across reloads.
+  useEffect(() => {
+    try { localStorage.setItem('jobjen.chatWidth', String(chatWidth)) } catch {}
+  }, [chatWidth])
+
+  // Drag-to-resize the AI panel. A full-screen overlay (rendered while
+  // `resizing`) sits above the JupyterLite iframe so the pointer-move events
+  // keep reaching the parent window — without it, the moment the cursor enters
+  // the iframe the parent stops receiving mousemove and the drag "sticks".
+  useEffect(() => {
+    if (!resizing) return
+    const onMove = (e) => {
+      const clientX = e.touches ? e.touches[0]?.clientX : e.clientX
+      if (clientX == null) return
+      if (e.cancelable) e.preventDefault()
+      setChatWidth(clampChatWidth(window.innerWidth - clientX))
+    }
+    const stop = () => setResizing(false)
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', stop)
+    window.addEventListener('touchmove', onMove, { passive: false })
+    window.addEventListener('touchend', stop)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', stop)
+      window.removeEventListener('touchmove', onMove)
+      window.removeEventListener('touchend', stop)
+    }
+  }, [resizing])
+
+  // Keep the panel width valid if the viewport is resized smaller.
+  useEffect(() => {
+    const onResize = () => setChatWidth((w) => clampChatWidth(w))
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
   }, [])
 
   // Warn before an accidental reload / tab-close while the assessment is still
@@ -355,11 +412,43 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
           />
         </div>
 
-        {/* AI chat panel — fixed 300 px */}
+        {/* Drag handle — resize the AI panel */}
         {chatOpen && (
-          <div className="h-full w-[300px] shrink-0 overflow-hidden">
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            title="Drag to resize the assistant"
+            onMouseDown={(e) => { e.preventDefault(); setResizing(true) }}
+            onTouchStart={() => setResizing(true)}
+            onDoubleClick={() => setChatWidth(clampChatWidth(340))}
+            className={`group relative h-full w-1 shrink-0 cursor-col-resize transition-colors ${
+              resizing ? 'bg-jobjen-accent' : 'bg-jobjen-border hover:bg-jobjen-accent'
+            }`}
+          >
+            {/* Wider invisible hit area for easier grabbing */}
+            <div className="absolute inset-y-0 -left-2 -right-2" />
+            {/* Grip dots */}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+              {[0, 1, 2].map((i) => (
+                <span key={i} className="w-0.5 h-0.5 rounded-full bg-white/70" />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* AI chat panel — candidate-resizable */}
+        {chatOpen && (
+          <div
+            className="h-full shrink-0 overflow-hidden"
+            style={{ width: chatWidth }}
+          >
             <ChatPanel onClose={() => setChatOpen(false)} />
           </div>
+        )}
+
+        {/* Resize overlay — captures pointer events over the iframe while dragging */}
+        {resizing && (
+          <div className="fixed inset-0 z-[9990] cursor-col-resize select-none" />
         )}
 
         {/* Reopen button — right edge when chat is closed */}
