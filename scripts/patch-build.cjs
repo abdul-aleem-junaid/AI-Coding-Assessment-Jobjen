@@ -445,6 +445,98 @@ const NOTEBOOK_IMPORT_SCRIPT = `
       })();
     </script>`;
 
+/* ── 10. Workspace reset bridge (wipes the store for a new session) ──────── */
+const NOTEBOOK_RESET_SCRIPT = `
+    <script>
+      /* JOBJEN WORKSPACE RESET BRIDGE
+         The JupyterLite file system lives in this origin's IndexedDB and is
+         shared across every assessment opened in this browser — it is NOT scoped
+         per candidate/session. When a NEW session starts, the parent React app
+         postMessages { type:'jobjen:resetWorkspace', id } and we delete every
+         file and folder in the workspace root so a previous question's files
+         can't leak into this one. (A genuine resume of the SAME session never
+         sends this, so in-progress work is preserved.) Reply
+         { type:'jobjen:workspaceReset', id, deleted }. */
+      (function () {
+        function getApp() {
+          return window.jupyterapp || window.jupyterlab || null;
+        }
+
+        function waitForApp(timeoutMs) {
+          var start = Date.now();
+          return new Promise(function (resolve, reject) {
+            (function tick() {
+              var app = getApp();
+              if (app && app.serviceManager && app.serviceManager.contents) {
+                app.serviceManager.ready
+                  ? app.serviceManager.ready.then(function () { resolve(app); }, function () { resolve(app); })
+                  : resolve(app);
+                return;
+              }
+              if (Date.now() - start > (timeoutMs || 60000)) {
+                reject(new Error('Notebook workspace is not ready.'));
+                return;
+              }
+              setTimeout(tick, 250);
+            })();
+          });
+        }
+
+        /* Depth-first delete: empty a directory's children before removing it,
+           so drives that refuse to delete a non-empty folder still clear. The
+           root ('') is emptied but never itself deleted. */
+        async function deletePath(contents, path) {
+          var model;
+          try { model = await contents.get(path, { content: true }); }
+          catch (e) { return 0; }
+          var count = 0;
+          if (model.type === 'directory') {
+            var children = model.content || [];
+            for (var i = 0; i < children.length; i++) {
+              count += await deletePath(contents, children[i].path);
+            }
+            if (path) { try { await contents.delete(path); count++; } catch (e) {} }
+          } else {
+            try { await contents.delete(path); count++; } catch (e) {}
+          }
+          return count;
+        }
+
+        async function reset() {
+          var app = getApp();
+          if (!app || !app.serviceManager || !app.serviceManager.contents) {
+            throw new Error('Notebook workspace is not ready yet.');
+          }
+          return await deletePath(app.serviceManager.contents, '');
+        }
+
+        window.addEventListener('message', function (event) {
+          var data = event.data;
+          if (!data || data.type !== 'jobjen:resetWorkspace') return;
+          var id = data.id;
+          waitForApp(60000)
+            .then(function () { return reset(); })
+            .then(function (deleted) {
+              window.parent.postMessage(
+                { type: 'jobjen:workspaceReset', id: id, deleted: deleted },
+                '*'
+              );
+            })
+            .catch(function (err) {
+              window.parent.postMessage(
+                {
+                  type: 'jobjen:workspaceReset',
+                  id: id,
+                  deleted: 0,
+                  error: (err && err.message) || 'Workspace reset failed.'
+                },
+                '*'
+              );
+            });
+        });
+      })();
+    </script>`;
+
 /* ── Apply patches ───────────────────────────────────────────────────────── */
 let html = fs.readFileSync(target, "utf8");
 let changed = false;
@@ -496,6 +588,13 @@ if (!html.includes("jobjen:importFiles")) {
   html = html.replace("  </body>", `${NOTEBOOK_IMPORT_SCRIPT}\n  </body>`);
   changed = true;
   console.log("[patch-build] ✓ Notebook import bridge injected");
+}
+
+/* Patch 10 — Workspace reset bridge */
+if (!html.includes("jobjen:resetWorkspace")) {
+  html = html.replace("  </body>", `${NOTEBOOK_RESET_SCRIPT}\n  </body>`);
+  changed = true;
+  console.log("[patch-build] ✓ Workspace reset bridge injected");
 }
 
 /*

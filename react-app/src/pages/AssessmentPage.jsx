@@ -13,7 +13,7 @@ import PiPCamera      from '../components/camera/PiPCamera'
 import { useSession, getSession } from '../lib/session'
 import { ScreenRecorder, acquireScreenStream } from '../lib/screenRecorder'
 import { exportAndUploadNotebooks } from '../lib/notebookExport'
-import { importQuestionFiles } from '../lib/notebookImport'
+import { importQuestionFiles, resetWorkspace } from '../lib/notebookImport'
 import api from '../lib/api'
 
 const ChatBubbleIcon = () => (
@@ -67,14 +67,47 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
     deadlineMs ? Math.max(0, deadlineMs - Date.now()) : 0,
   )
 
-  // Seed the question's attachment files into the JupyterLite workspace once, so
-  // the candidate sees them directly (the primary file auto-opens).
+  // Seed the question's attachment files into the JupyterLite workspace, so the
+  // candidate sees them directly (the primary file auto-opens).
+  //
+  // The workspace is browser-IndexedDB-backed and shared across EVERY assessment
+  // opened in this browser (it is not scoped per candidate/session). So we gate
+  // on a persistent marker: when this is a NEW session (the stored owner differs
+  // from the current sessionId), wipe the workspace first so a previous
+  // question's files can't leak in, then import. When it's the SAME session (a
+  // genuine resume after a reload), we touch nothing — keeping the candidate's
+  // in-progress edits and avoiding re-importing the pristine files over them.
   useEffect(() => {
     if (importedRef.current) return
-    const files = getSession().question?.files
-    if (!files || files.length === 0) return
     importedRef.current = true
-    importQuestionFiles(files, { open: true }).catch((err) => {
+
+    const { sessionId, question } = getSession()
+    const files = question?.files
+
+    const MARKER_KEY = 'jobjen.workspaceOwner'
+    let prevOwner = null
+    try { prevOwner = localStorage.getItem(MARKER_KEY) } catch { /* storage disabled */ }
+
+    // Without a sessionId we can't tell a new session from a resume; fall back to
+    // the plain import (no wipe) rather than risk clobbering an existing one.
+    const isResume = !!sessionId && prevOwner === sessionId
+    if (isResume) return
+
+    const run = async () => {
+      if (sessionId) {
+        try {
+          await resetWorkspace()
+        } catch (err) {
+          console.warn('[assessment] workspace reset failed:', err)
+        }
+        try { localStorage.setItem(MARKER_KEY, sessionId) } catch { /* ignore */ }
+      }
+      if (files && files.length > 0) {
+        await importQuestionFiles(files, { open: true })
+      }
+    }
+
+    run().catch((err) => {
       console.error('[assessment] file import failed:', err)
       setRecWarning((w) => w || 'Some task files could not be loaded into the notebook automatically. Please contact your recruiter if any files are missing.')
     })

@@ -94,6 +94,51 @@ async function importOnce(files, open) {
   });
 }
 
+/**
+ * Wipe the JupyterLite workspace (every file/folder in the root) before seeding
+ * a new session's files. The workspace lives in this origin's IndexedDB and is
+ * shared across every assessment opened in this browser, so without this a
+ * previous candidate's question files leak into the next one. Drives the
+ * in-iframe reset bridge (scripts/patch-build.cjs "Patch 10"); resolves with the
+ * count deleted, or rejects on ack-error / timeout.
+ *
+ * Caller contract: invoke this ONLY for a new session (different sessionId), not
+ * on a resume of the same session — a resume must keep the candidate's work.
+ */
+export function resetWorkspace(timeoutMs = 30000) {
+  return new Promise((resolve, reject) => {
+    waitForWindow()
+      .then((win) => {
+        const id =
+          (crypto.randomUUID && crypto.randomUUID()) ||
+          String(Date.now() + Math.random());
+
+        const onMessage = (e) => {
+          if (e.source !== win) return;
+          const d = e.data;
+          if (!d || d.type !== "jobjen:workspaceReset" || d.id !== id) return;
+          cleanup();
+          if (d.error) reject(new Error(d.error));
+          else resolve({ deleted: d.deleted ?? 0 });
+        };
+
+        const timer = setTimeout(() => {
+          cleanup();
+          reject(new Error("Timed out resetting the workspace."));
+        }, timeoutMs);
+
+        function cleanup() {
+          clearTimeout(timer);
+          window.removeEventListener("message", onMessage);
+        }
+
+        window.addEventListener("message", onMessage);
+        win.postMessage({ type: "jobjen:resetWorkspace", id }, "*");
+      })
+      .catch(reject);
+  });
+}
+
 /** How many times to attempt the whole import before giving up. */
 const MAX_IMPORT_ATTEMPTS = 3;
 /** Pause between attempts so a transient failure (frame not ready yet, flaky S3
