@@ -52,6 +52,10 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
   const startedRef = useRef(false)
   const importedRef = useRef(false)
   const autoSubmittedRef = useRef(false)
+  // Capture the recording duration ONCE, on the first stop() (L4). A failed
+  // submit drops back to 'active'; on the retry the recorder is already stopped
+  // and returns 0, which would otherwise overwrite the real duration with 0.
+  const durationRef = useRef(0)
 
   // Absolute deadline (ms) from the server; 0 = no time limit. Recomputed only
   // when the server value changes, so close/reopen keeps the same deadline.
@@ -178,16 +182,18 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
     setPhase('submitting')
     setSubmitError('')
 
-    let durationSec = 0
     // 1. Finalize the recording (best-effort — the backend assembles whatever
-    //    parts landed even if the tail upload fails).
+    //    parts landed even if the tail upload fails). Capture the duration once
+    //    (L4): a retry calls stop() again, which returns 0 on an already-stopped
+    //    recorder; reusing the stored value avoids overwriting it with 0.
     setSubmitStep('recording')
     try {
       const r = await recorderRef.current?.stop()
-      durationSec = r?.durationSec ?? 0
+      if (r?.durationSec) durationRef.current = r.durationSec
     } catch (err) {
       console.error('[assessment] recording finalize failed:', err)
     }
+    const durationSec = durationRef.current
 
     // 2. Export + upload all workspace notebooks (the core deliverable).
     setSubmitStep('notebooks')

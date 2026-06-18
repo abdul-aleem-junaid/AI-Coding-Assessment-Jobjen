@@ -164,7 +164,7 @@ export default function PreflightPage({ streamRef, screenStreamRef, onBegin }) {
               <CameraIcon />
               <p>
                 {permission === "denied"
-                  ? "Access denied. Allow camera & microphone in your browser settings and reload the page."
+                  ? "Access denied. Allow camera & microphone in your browser settings, then click Try again below."
                   : "Your camera preview will appear here."}
               </p>
             </div>
@@ -274,12 +274,21 @@ export default function PreflightPage({ streamRef, screenStreamRef, onBegin }) {
             </>
           )}
           {permission === "denied" && (
-            <button
-              disabled
-              className="jobjen-btn-primary w-full py-3.5 px-8 text-base font-semibold rounded-xl"
-            >
-              Camera Access Required
-            </button>
+            <>
+              {/* Retry in-place (L13) — no full page reload needed. Re-prompts if
+                  the user only dismissed; if hard-blocked in site settings they
+                  allow there first, then click this. */}
+              <button
+                onClick={requestPermissions}
+                className="jobjen-btn-primary w-full py-3.5 px-8 text-base font-semibold rounded-xl"
+              >
+                Try again
+              </button>
+              <p className="text-xs text-red-400 mt-2 text-center leading-relaxed">
+                Camera &amp; microphone access is required. Allow it in your
+                browser, then click Try again.
+              </p>
+            </>
           )}
         </div>
       </div>
