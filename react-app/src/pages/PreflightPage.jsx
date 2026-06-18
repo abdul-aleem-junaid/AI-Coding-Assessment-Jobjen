@@ -57,6 +57,26 @@ const MicIcon = () => (
   </svg>
 );
 
+// Best-effort: put the whole page into fullscreen. Called synchronously inside
+// the "Begin" click handler so it shares that user activation (the Fullscreen
+// API requires a gesture, just like getDisplayMedia). Cross-browser, and never
+// blocks the assessment if the browser refuses or the candidate cancels.
+function enterFullscreen() {
+  const el = document.documentElement;
+  try {
+    const req =
+      el.requestFullscreen ||
+      el.webkitRequestFullscreen ||
+      el.msRequestFullscreen;
+    if (req) {
+      const p = req.call(el);
+      if (p && typeof p.catch === "function") p.catch(() => {});
+    }
+  } catch {
+    // Fullscreen denied / unsupported — proceed with the assessment anyway.
+  }
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 export default function PreflightPage({ streamRef, screenStreamRef, onBegin }) {
   const [permission, setPermission] = useState("idle"); // idle | requesting | granted | denied
@@ -124,6 +144,9 @@ export default function PreflightPage({ streamRef, screenStreamRef, onBegin }) {
   const beginAssessment = async () => {
     setScreenState("requesting");
     setScreenError("");
+    // Go fullscreen on this same click gesture. Fired (not awaited) so the user
+    // activation stays available for getDisplayMedia immediately below.
+    enterFullscreen();
     try {
       const screen = await acquireScreenStream();
       screenStreamRef.current = screen;
