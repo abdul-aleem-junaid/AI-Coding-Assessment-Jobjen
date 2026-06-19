@@ -2,13 +2,16 @@
 //
 // AI assistant side panel — a coach-only coding helper the candidate can chat
 // with while solving the assigned problem. Talks to the backend
-// `POST /technical/assistant` endpoint through the encrypted `api` layer (which
-// injects the single-use technical token + the crypto envelope automatically).
-// The server binds the chat to the session's assigned question and hard-bounds
-// the assistant to coaching (it never writes the solution).
+// `POST /technical/assistant/stream` endpoint, which streams the reply as
+// Server-Sent Events so the message renders token-by-token (see
+// lib/assistantStream.js). That endpoint is intentionally UNENCRYPTED — the
+// coaching chat carries no sensitive data, and skipping the crypto envelope is
+// what lets us stream — but it still injects the single-use technical token for
+// auth. The server binds the chat to the session's assigned question and
+// hard-bounds the assistant to coaching (it never writes the solution).
 
 import { AssistantRuntimeProvider, useLocalRuntime } from '@assistant-ui/react'
-import api from '../../lib/api'
+import { streamAssistant } from '../../lib/assistantStream'
 import { getSession } from '../../lib/session'
 import ChatThread from './ChatThread'
 
@@ -73,22 +76,94 @@ const assistantAdapter = {
 
     if (!history.length || history[history.length - 1].role !== 'user') return
 
+    // Stream the reply token-by-token over SSE (unencrypted endpoint — see
+    // assistantStream.js). Deltas land in a shared buffer that a queue drains:
+    // the @assistant-ui local runtime treats each yield as the message's full
+    // current state, so we yield the accumulated text whenever new text arrives.
+    let acc = ''
+    let pending = false
+    let resolveWake = null
+    let finished = false
+    let streamError = null
+
+    const wake = () => {
+      if (resolveWake) {
+        const r = resolveWake
+        resolveWake = null
+        r()
+      }
+    }
+
+    const run = streamAssistant({
+      sessionId,
+      messages: history,
+      signal: abortSignal,
+      onDelta: (delta) => {
+        acc += delta
+        pending = true
+        wake()
+      },
+    })
+      .then(() => {
+        finished = true
+        wake()
+      })
+      .catch((err) => {
+        streamError = err
+        finished = true
+        wake()
+      })
+
     try {
-      const res = await api.post(
-        '/technical/assistant',
-        { sessionId, messages: history },
-        { signal: abortSignal },
-      )
-      const reply =
-        res?.data?.reply ||
-        "Sorry, I couldn't come up with a reply. Please try again."
-      yield { content: [{ type: 'text', text: reply }] }
+      while (true) {
+        if (pending) {
+          pending = false
+          yield { content: [{ type: 'text', text: acc }] }
+          continue
+        }
+        if (finished) break
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((resolve) => {
+          resolveWake = resolve
+        })
+      }
+      await run
+
+      if (abortSignal?.aborted) return
+
+      if (streamError) {
+        // Nothing streamed yet → show the error as the reply. If we already
+        // rendered partial text, keep it and append a short notice.
+        const msg =
+          streamError?.message ||
+          'The AI assistant is temporarily unavailable. Please try again in a moment.'
+        yield {
+          content: [
+            {
+              type: 'text',
+              text: acc ? `${acc}\n\n_${msg}_` : msg,
+            },
+          ],
+        }
+        return
+      }
+
+      if (!acc) {
+        yield {
+          content: [
+            {
+              type: 'text',
+              text: "Sorry, I couldn't come up with a reply. Please try again.",
+            },
+          ],
+        }
+      }
     } catch (err) {
-      if (err?.code === 'ERR_CANCELED' || abortSignal?.aborted) return
+      if (abortSignal?.aborted) return
       const msg =
-        err?.response?.data?.message ||
+        err?.message ||
         'The AI assistant is temporarily unavailable. Please try again in a moment.'
-      yield { content: [{ type: 'text', text: msg }] }
+      yield { content: [{ type: 'text', text: acc ? `${acc}\n\n_${msg}_` : msg }] }
     }
   },
 }
