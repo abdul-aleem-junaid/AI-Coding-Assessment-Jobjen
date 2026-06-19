@@ -114,10 +114,26 @@ const assistantAdapter = {
         wake()
       })
 
+    // Coalesce tokens to ~frame cadence. Re-rendering on EVERY token makes
+    // ReactMarkdown re-parse the whole growing message each time (it has no
+    // incremental parse) — that's what janks the panel on longer replies.
+    // Flushing at most once per FLUSH_MS keeps the reveal visually smooth while
+    // cutting re-renders (and markdown re-parses) by ~10x.
+    const FLUSH_MS = 40
+    let lastFlush = 0
+    let lastRendered = ''
+
     try {
       while (true) {
         if (pending) {
+          const wait = FLUSH_MS - (Date.now() - lastFlush)
+          if (wait > 0) {
+            // eslint-disable-next-line no-await-in-loop
+            await new Promise((resolve) => setTimeout(resolve, wait))
+          }
           pending = false
+          lastFlush = Date.now()
+          lastRendered = acc
           yield { content: [{ type: 'text', text: acc }] }
           continue
         }
@@ -130,6 +146,12 @@ const assistantAdapter = {
       await run
 
       if (abortSignal?.aborted) return
+
+      // Final flush: emit any tokens that landed after the last throttled yield
+      // so the completed message is always whole.
+      if (!streamError && acc && acc !== lastRendered) {
+        yield { content: [{ type: 'text', text: acc }] }
+      }
 
       if (streamError) {
         // Nothing streamed yet → show the error as the reply. If we already

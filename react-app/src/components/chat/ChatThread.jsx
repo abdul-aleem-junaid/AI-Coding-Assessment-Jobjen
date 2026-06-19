@@ -96,12 +96,15 @@ function AssistantMessage() {
     <MessagePrimitive.Root className="flex w-full justify-start gap-2">
       <AssistantAvatar />
       <div className="max-w-[85%] px-3.5 py-2.5 rounded-2xl rounded-bl-md text-[0.8rem] leading-[1.55] break-words bg-jobjen-surface text-jobjen-muted border border-jobjen-border shadow-[0_1px_6px_rgba(0,0,0,0.18)]">
-        <MessagePrimitive.If running>
+        {/* Bouncing dots only until the first token lands; once any text has
+            streamed in, `hasContent` flips true and the dots disappear. (NB:
+            `running` is NOT a valid MessageIf filter in @assistant-ui ≥0.14 —
+            it's silently ignored — so gate on hasContent, not running.) */}
+        <MessagePrimitive.If hasContent={false}>
           <TypingDots />
         </MessagePrimitive.If>
-        <MessagePrimitive.If running={false}>
-          <MessagePrimitive.Content components={{ Text: MarkdownText }} />
-        </MessagePrimitive.If>
+        {/* Render the streamed content live (it updates as tokens arrive). */}
+        <MessagePrimitive.Content components={{ Text: MarkdownText }} />
       </div>
     </MessagePrimitive.Root>
   )
@@ -164,10 +167,10 @@ export default function ChatThread() {
           </div>
         </ThreadPrimitive.Empty>
 
-        {/* The in-bubble `MessagePrimitive.If running` dots (see AssistantMessage)
-            are the single source of the "typing" state — the local runtime mounts
-            the assistant message immediately, so no separate thread-level fallback
-            is needed (a second one here caused two loaders). */}
+        {/* The in-bubble `hasContent={false}` dots (see AssistantMessage) are the
+            single source of the "typing" state — the local runtime mounts the
+            assistant message immediately, so no separate thread-level fallback is
+            needed (a second one here caused two loaders). */}
         <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
       </ThreadPrimitive.Viewport>
 
