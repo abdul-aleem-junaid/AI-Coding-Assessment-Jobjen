@@ -73,9 +73,24 @@ const mdComponents = {
   h3:     ({ children }) => <h3 className="text-white font-bold text-[0.82rem] mt-1.5 mb-1">{children}</h3>,
 }
 
-const MarkdownText = ({ text }) => (
-  <ReactMarkdown components={mdComponents}>{text}</ReactMarkdown>
+// While the reply is still streaming we render PLAIN text, not markdown.
+// ReactMarkdown re-parses the entire growing string on every update, and the
+// resulting layout reflow (paragraphs, lists and code blocks forming and
+// re-forming as tokens land) is what reads as a janky "animation". Plain text
+// in a pre-wrap span just appends — no re-parse, no reflow — so the reveal is
+// smooth. Once the part is no longer `running` we render the final markdown
+// once (a single clean reformat). `status` is supplied by @assistant-ui on the
+// custom Text component (TextMessagePartProps).
+const StreamingText = ({ text }) => (
+  <span className="whitespace-pre-wrap break-words">{text}</span>
 )
+
+const MarkdownText = ({ text, status }) =>
+  status?.type === 'running' ? (
+    <StreamingText text={text} />
+  ) : (
+    <ReactMarkdown components={mdComponents}>{text}</ReactMarkdown>
+  )
 
 // ── Message bubbles ───────────────────────────────────────────────────────────
 function UserMessage() {
