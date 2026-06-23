@@ -281,6 +281,32 @@ const NOTEBOOK_EXPORT_SCRIPT = `
           return window.jupyterapp || window.jupyterlab || null;
         }
 
+        /* Wait for the JupyterLite app + Contents service to be ready, rather
+           than failing fast. A submit fired right after a page reload (e.g. the
+           deadline lapsed during the reload, triggering an immediate auto-submit)
+           reaches here before the freshly-mounted iframe has booted; without this
+           the export would reply 'workspace not ready' and the upload would fail
+           even though the workspace is seconds from ready. */
+        function waitForApp(timeoutMs) {
+          var start = Date.now();
+          return new Promise(function (resolve, reject) {
+            (function tick() {
+              var app = getApp();
+              if (app && app.serviceManager && app.serviceManager.contents) {
+                app.serviceManager.ready
+                  ? app.serviceManager.ready.then(function () { resolve(app); }, function () { resolve(app); })
+                  : resolve(app);
+                return;
+              }
+              if (Date.now() - start > (timeoutMs || 30000)) {
+                reject(new Error('Notebook workspace is not ready.'));
+                return;
+              }
+              setTimeout(tick, 250);
+            })();
+          });
+        }
+
         async function listNotebooks(contents, path) {
           var model = await contents.get(path, { content: true });
           var out = [];
@@ -298,10 +324,7 @@ const NOTEBOOK_EXPORT_SCRIPT = `
         }
 
         async function collect() {
-          var app = getApp();
-          if (!app || !app.serviceManager || !app.serviceManager.contents) {
-            throw new Error('Notebook workspace is not ready yet.');
-          }
+          var app = await waitForApp(30000);
           var contents = app.serviceManager.contents;
           /* Persist any unsaved editor state first, best-effort. */
           try {
@@ -445,6 +468,187 @@ const NOTEBOOK_IMPORT_SCRIPT = `
       })();
     </script>`;
 
+/* ── 10. Workspace reset bridge (wipes the store for a new session) ──────── */
+const NOTEBOOK_RESET_SCRIPT = `
+    <script>
+      /* JOBJEN WORKSPACE RESET BRIDGE
+         The JupyterLite file system lives in this origin's IndexedDB and is
+         shared across every assessment opened in this browser — it is NOT scoped
+         per candidate/session. When a NEW session starts, the parent React app
+         postMessages { type:'jobjen:resetWorkspace', id } and we delete every
+         file and folder in the workspace root so a previous question's files
+         can't leak into this one. (A genuine resume of the SAME session never
+         sends this, so in-progress work is preserved.) Reply
+         { type:'jobjen:workspaceReset', id, deleted }. */
+      (function () {
+        function getApp() {
+          return window.jupyterapp || window.jupyterlab || null;
+        }
+
+        function waitForApp(timeoutMs) {
+          var start = Date.now();
+          return new Promise(function (resolve, reject) {
+            (function tick() {
+              var app = getApp();
+              if (app && app.serviceManager && app.serviceManager.contents) {
+                app.serviceManager.ready
+                  ? app.serviceManager.ready.then(function () { resolve(app); }, function () { resolve(app); })
+                  : resolve(app);
+                return;
+              }
+              if (Date.now() - start > (timeoutMs || 60000)) {
+                reject(new Error('Notebook workspace is not ready.'));
+                return;
+              }
+              setTimeout(tick, 250);
+            })();
+          });
+        }
+
+        /* Depth-first delete: empty a directory's children before removing it,
+           so drives that refuse to delete a non-empty folder still clear. The
+           root ('') is emptied but never itself deleted. */
+        async function deletePath(contents, path) {
+          var model;
+          try { model = await contents.get(path, { content: true }); }
+          catch (e) { return 0; }
+          var count = 0;
+          if (model.type === 'directory') {
+            var children = model.content || [];
+            for (var i = 0; i < children.length; i++) {
+              count += await deletePath(contents, children[i].path);
+            }
+            if (path) { try { await contents.delete(path); count++; } catch (e) {} }
+          } else {
+            try { await contents.delete(path); count++; } catch (e) {}
+          }
+          return count;
+        }
+
+        async function reset() {
+          var app = getApp();
+          if (!app || !app.serviceManager || !app.serviceManager.contents) {
+            throw new Error('Notebook workspace is not ready yet.');
+          }
+          return await deletePath(app.serviceManager.contents, '');
+        }
+
+        window.addEventListener('message', function (event) {
+          var data = event.data;
+          if (!data || data.type !== 'jobjen:resetWorkspace') return;
+          var id = data.id;
+          waitForApp(60000)
+            .then(function () { return reset(); })
+            .then(function (deleted) {
+              window.parent.postMessage(
+                { type: 'jobjen:workspaceReset', id: id, deleted: deleted },
+                '*'
+              );
+            })
+            .catch(function (err) {
+              window.parent.postMessage(
+                {
+                  type: 'jobjen:workspaceReset',
+                  id: id,
+                  deleted: 0,
+                  error: (err && err.message) || 'Workspace reset failed.'
+                },
+                '*'
+              );
+            });
+        });
+      })();
+    </script>`;
+
+/* ── 11a. Running-cell indicator CSS (Colab-style "this cell is running") ── */
+const RUNNING_INDICATOR_CSS = `
+    <style>
+      /* ── JOBJEN RUNNING-CELL INDICATOR ──────────────────────────────────
+         JupyterLite only marks a busy cell with a faint [*] in the input
+         prompt. These styles make an executing cell obvious (Colab-style):
+         a purple left bar + soft tint, a spinner over the input prompt, and a
+         pulsing "Running…" badge. Toggled by the .jobjen-cell-running class
+         that the script below adds while the prompt shows [*]. */
+      @keyframes jobjen-cell-spin  { to { transform: rotate(360deg); } }
+      @keyframes jobjen-cell-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+      .jp-Cell.jobjen-cell-running {
+        position: relative;
+        box-shadow: inset 3px 0 0 0 #7c3aed;
+        background: rgba(124, 58, 237, 0.06);
+        border-radius: 4px;
+        transition: background 0.15s ease;
+      }
+
+      /* Hide the [*] glyph and overlay a spinner in the prompt gutter. */
+      .jp-Cell.jobjen-cell-running .jp-InputArea-prompt {
+        position: relative;
+        color: transparent !important;
+      }
+      .jp-Cell.jobjen-cell-running .jp-InputArea-prompt::after {
+        content: '';
+        position: absolute;
+        top: 6px;
+        left: 50%;
+        width: 12px;
+        height: 12px;
+        margin-left: -6px;
+        border: 2px solid rgba(124, 58, 237, 0.3);
+        border-top-color: #7c3aed;
+        border-radius: 50%;
+        animation: jobjen-cell-spin 0.7s linear infinite;
+      }
+
+      /* Pulsing "Running…" badge, top-right of the cell. */
+      .jp-Cell.jobjen-cell-running::after {
+        content: 'Running…';
+        position: absolute;
+        top: 4px;
+        right: 8px;
+        z-index: 3;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        color: #c4b5fd;
+        background: rgba(124, 58, 237, 0.14);
+        padding: 1px 7px;
+        border-radius: 4px;
+        pointer-events: none;
+        animation: jobjen-cell-pulse 1.2s ease-in-out infinite;
+      }
+    </style>`;
+
+/* ── 11b. Running-cell indicator script (watches the [*] busy marker) ────── */
+const RUNNING_INDICATOR_SCRIPT = `
+    <script>
+      /* JOBJEN_RUNNING_INDICATOR_SCRIPT
+         Watch the DOM and add/remove .jobjen-cell-running on each cell whose
+         input prompt shows the [*] busy marker, so the CSS above can render a
+         Colab-style spinner + "Running…" badge while it executes. */
+      (function () {
+        function refresh() {
+          var cells = document.querySelectorAll('.jp-Cell');
+          for (var i = 0; i < cells.length; i++) {
+            var cell = cells[i];
+            var prompt = cell.querySelector('.jp-InputArea-prompt');
+            var running = !!prompt && prompt.textContent.indexOf('[*]') !== -1;
+            cell.classList.toggle('jobjen-cell-running', running);
+          }
+        }
+        var obs = new MutationObserver(refresh);
+        function start() {
+          refresh();
+          /* characterData catches the prompt flipping [ ] → [*] → [n] in place. */
+          obs.observe(document.body, { childList: true, subtree: true, characterData: true });
+        }
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', start);
+        } else {
+          start();
+        }
+      })();
+    </script>`;
+
 /* ── Apply patches ───────────────────────────────────────────────────────── */
 let html = fs.readFileSync(target, "utf8");
 let changed = false;
@@ -496,6 +700,27 @@ if (!html.includes("jobjen:importFiles")) {
   html = html.replace("  </body>", `${NOTEBOOK_IMPORT_SCRIPT}\n  </body>`);
   changed = true;
   console.log("[patch-build] ✓ Notebook import bridge injected");
+}
+
+/* Patch 10 — Workspace reset bridge */
+if (!html.includes("jobjen:resetWorkspace")) {
+  html = html.replace("  </body>", `${NOTEBOOK_RESET_SCRIPT}\n  </body>`);
+  changed = true;
+  console.log("[patch-build] ✓ Workspace reset bridge injected");
+}
+
+/* Patch 11a — Running-cell indicator CSS */
+if (!html.includes("jobjen-cell-spin")) {
+  html = html.replace("</head>", `${RUNNING_INDICATOR_CSS}\n  </head>`);
+  changed = true;
+  console.log("[patch-build] ✓ Running-cell indicator CSS injected");
+}
+
+/* Patch 11b — Running-cell indicator script */
+if (!html.includes("JOBJEN_RUNNING_INDICATOR_SCRIPT")) {
+  html = html.replace("  </body>", `${RUNNING_INDICATOR_SCRIPT}\n  </body>`);
+  changed = true;
+  console.log("[patch-build] ✓ Running-cell indicator script injected");
 }
 
 /*

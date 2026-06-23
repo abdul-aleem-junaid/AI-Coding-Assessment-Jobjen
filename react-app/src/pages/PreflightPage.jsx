@@ -57,11 +57,32 @@ const MicIcon = () => (
   </svg>
 );
 
+// Best-effort: put the whole page into fullscreen. Called synchronously inside
+// the "Begin" click handler so it shares that user activation (the Fullscreen
+// API requires a gesture, just like getDisplayMedia). Cross-browser, and never
+// blocks the assessment if the browser refuses or the candidate cancels.
+function enterFullscreen() {
+  const el = document.documentElement;
+  try {
+    const req =
+      el.requestFullscreen ||
+      el.webkitRequestFullscreen ||
+      el.msRequestFullscreen;
+    if (req) {
+      const p = req.call(el);
+      if (p && typeof p.catch === "function") p.catch(() => {});
+    }
+  } catch {
+    // Fullscreen denied / unsupported — proceed with the assessment anyway.
+  }
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 export default function PreflightPage({ streamRef, screenStreamRef, onBegin }) {
   const [permission, setPermission] = useState("idle"); // idle | requesting | granted | denied
   const [micLevel, setMicLevel] = useState(0);
   const [screenState, setScreenState] = useState("idle"); // idle | requesting | error
+  const [screenError, setScreenError] = useState("");
 
   const preflightVideoRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -122,13 +143,22 @@ export default function PreflightPage({ streamRef, screenStreamRef, onBegin }) {
   // user gesture). We record the SCREEN + mic; the webcam stays a live PiP.
   const beginAssessment = async () => {
     setScreenState("requesting");
+    setScreenError("");
+    // Go fullscreen on this same click gesture. Fired (not awaited) so the user
+    // activation stays available for getDisplayMedia immediately below.
+    enterFullscreen();
     try {
       const screen = await acquireScreenStream();
       screenStreamRef.current = screen;
       setScreenState("idle");
       onBegin();
-    } catch {
+    } catch (err) {
       setScreenState("error");
+      setScreenError(
+        err?.code === "ENTIRE_SCREEN_REQUIRED"
+          ? "You must share your ENTIRE screen — not a single tab or window. Click again and choose your full screen / monitor."
+          : "Screen sharing was denied or cancelled. You must share your full screen to continue.",
+      );
     }
   };
 
@@ -157,7 +187,7 @@ export default function PreflightPage({ streamRef, screenStreamRef, onBegin }) {
               <CameraIcon />
               <p>
                 {permission === "denied"
-                  ? "Access denied. Allow camera & microphone in your browser settings and reload the page."
+                  ? "Access denied. Allow camera & microphone in your browser settings, then click Try again below."
                   : "Your camera preview will appear here."}
               </p>
             </div>
@@ -260,22 +290,28 @@ export default function PreflightPage({ streamRef, screenStreamRef, onBegin }) {
               <p className="text-xs text-jobjen-subtle mt-2 text-center leading-relaxed">
                 You'll be asked to share your <strong>entire screen</strong> —
                 this is recorded for the duration of the assessment.
-                {screenState === "error" && (
-                  <span className="block text-red-400 mt-1">
-                    Screen sharing was denied or cancelled. You must share your
-                    full screen to continue.
-                  </span>
+                {screenState === "error" && screenError && (
+                  <span className="block text-red-400 mt-1">{screenError}</span>
                 )}
               </p>
             </>
           )}
           {permission === "denied" && (
-            <button
-              disabled
-              className="jobjen-btn-primary w-full py-3.5 px-8 text-base font-semibold rounded-xl"
-            >
-              Camera Access Required
-            </button>
+            <>
+              {/* Retry in-place (L13) — no full page reload needed. Re-prompts if
+                  the user only dismissed; if hard-blocked in site settings they
+                  allow there first, then click this. */}
+              <button
+                onClick={requestPermissions}
+                className="jobjen-btn-primary w-full py-3.5 px-8 text-base font-semibold rounded-xl"
+              >
+                Try again
+              </button>
+              <p className="text-xs text-red-400 mt-2 text-center leading-relaxed">
+                Camera &amp; microphone access is required. Allow it in your
+                browser, then click Try again.
+              </p>
+            </>
           )}
         </div>
       </div>

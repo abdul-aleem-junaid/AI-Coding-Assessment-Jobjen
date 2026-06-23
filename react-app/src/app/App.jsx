@@ -130,8 +130,8 @@ export default function App() {
     setStarting(true);
     try {
       const res = await api.post("/apply/technical/start", { token });
-      const { sessionId, candidateName, question } = res.data ?? {};
-      setSession({ sessionId, candidateName, question });
+      const { sessionId, candidateName, question, deadlineAt } = res.data ?? {};
+      setSession({ sessionId, candidateName, question, deadlineAt });
       setStartError("");
       navigate("/preflight");
     } catch (err) {
@@ -141,7 +141,42 @@ export default function App() {
     }
   };
 
-  if (startError && location.pathname === "/") {
+  // Re-establish the session after a page reload. On reload only the `token`
+  // survives (from the URL); the in-memory sessionId / question / deadline are
+  // gone, and `/start` is otherwise only called from the landing "Start" button
+  // — which a refresh skips (the hash route jumps straight to preflight/
+  // assessment). Without this, a refreshed candidate looks "back on the problem"
+  // (the editor's files persist in IndexedDB) but has NO live session: the timer
+  // vanishes (no deadline) and submit fails (no sessionId). `/start` is
+  // idempotent and resumes the same session, so we re-fetch it here. We skip the
+  // landing route ("/"), where the candidate intentionally clicks Start.
+  const resumedRef = useRef(false);
+  useEffect(() => {
+    if (resumedRef.current) return;
+    const { token, sessionId } = getSession();
+    if (!token || sessionId || location.pathname === "/") return;
+    resumedRef.current = true;
+    (async () => {
+      setStarting(true);
+      try {
+        const res = await api.post("/apply/technical/start", { token });
+        const { sessionId, candidateName, question, deadlineAt } =
+          res.data ?? {};
+        setSession({ sessionId, candidateName, question, deadlineAt });
+        setStartError("");
+      } catch (err) {
+        setStartError(describeStartError(err));
+      } finally {
+        setStarting(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
+
+  // Surface a fatal start/resume error on ANY route — a failed resume after
+  // reload (e.g. an already-submitted or expired link) must not silently strand
+  // the candidate on preflight/assessment with no session.
+  if (startError) {
     return <ErrorScreen message={startError} />;
   }
 

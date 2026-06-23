@@ -6,14 +6,14 @@
 // On mount it starts the screen+mic recording (streamed to S3); on Submit it
 // finalizes the recording, uploads all workspace notebooks, and submits.
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import ChatPanel      from '../components/chat/ChatPanel'
 import NotebookFrame  from '../components/notebook/NotebookFrame'
 import PiPCamera      from '../components/camera/PiPCamera'
 import { useSession, getSession } from '../lib/session'
-import { ScreenRecorder } from '../lib/screenRecorder'
+import { ScreenRecorder, acquireScreenStream } from '../lib/screenRecorder'
 import { exportAndUploadNotebooks } from '../lib/notebookExport'
-import { importQuestionFiles } from '../lib/notebookImport'
+import { importQuestionFiles, resetWorkspace } from '../lib/notebookImport'
 import api from '../lib/api'
 
 const ChatBubbleIcon = () => (
@@ -28,56 +28,159 @@ const SUBMIT_LABELS = {
   finalizing: 'Submitting your assessment…',
 }
 
+/** mm:ss for the countdown pill. */
+function formatRemaining(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  const m = Math.floor(total / 60)
+  const s = total % 60
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
+// AI panel resize bounds. The upper bound is also capped at runtime so the
+// editor never shrinks below ~380px (see clampChatWidth).
+const CHAT_MIN_WIDTH = 280
+const CHAT_MAX_WIDTH = 760
+
+/** Clamp a desired panel width to [MIN, MAX] and keep the editor usable. */
+function clampChatWidth(px) {
+  const runtimeMax = Math.max(
+    CHAT_MIN_WIDTH,
+    Math.min(CHAT_MAX_WIDTH, window.innerWidth - 380),
+  )
+  return Math.round(Math.min(runtimeMax, Math.max(CHAT_MIN_WIDTH, px)))
+}
+
 export default function AssessmentPage({ streamRef, screenStreamRef }) {
   const session = useSession()
   const [chatOpen, setChatOpen] = useState(true)
+  // Candidate-resizable AI panel width (px), persisted across reloads.
+  const [chatWidth, setChatWidth] = useState(() => {
+    const saved = Number(localStorage.getItem('jobjen.chatWidth'))
+    return saved >= CHAT_MIN_WIDTH && saved <= CHAT_MAX_WIDTH ? saved : 340
+  })
+  const [resizing, setResizing] = useState(false)
   const [blurred,  setBlurred]  = useState(false)
+  const armedRef = useRef(false) // blur-detector armed only after the page holds focus once
   const [phase, setPhase] = useState('active') // active | submitting | done
   const [submitStep, setSubmitStep] = useState('')
   const [submitError, setSubmitError] = useState('')
   const [recWarning, setRecWarning] = useState('')
+  const [recordingDown, setRecordingDown] = useState('') // '' = healthy; else a reason
+  const [reSharing, setReSharing] = useState(false)
+  const [reshareError, setReshareError] = useState('')
 
   const recorderRef = useRef(null)
+  const startedRef = useRef(false)
   const importedRef = useRef(false)
+  const autoSubmittedRef = useRef(false)
+  // Capture the recording duration ONCE, on the first stop() (L4). A failed
+  // submit drops back to 'active'; on the retry the recorder is already stopped
+  // and returns 0, which would otherwise overwrite the real duration with 0.
+  const durationRef = useRef(0)
 
-  // Seed the question's attachment files into the JupyterLite workspace once, so
-  // the candidate sees them directly (the primary file auto-opens).
+  // Absolute deadline (ms) from the server; 0 = no time limit. Recomputed only
+  // when the server value changes, so close/reopen keeps the same deadline.
+  const deadlineMs = useMemo(() => {
+    const t = session.deadlineAt ? new Date(session.deadlineAt).getTime() : 0
+    return Number.isFinite(t) && t > 0 ? t : 0
+  }, [session.deadlineAt])
+  const [remainingMs, setRemainingMs] = useState(() =>
+    deadlineMs ? Math.max(0, deadlineMs - Date.now()) : 0,
+  )
+
+  // Seed the question's attachment files into the JupyterLite workspace, so the
+  // candidate sees them directly (the primary file auto-opens).
+  //
+  // The workspace is browser-IndexedDB-backed and shared across EVERY assessment
+  // opened in this browser (it is not scoped per candidate/session). So we gate
+  // on a persistent marker: when this is a NEW session (the stored owner differs
+  // from the current sessionId), wipe the workspace first so a previous
+  // question's files can't leak in, then import. When it's the SAME session (a
+  // genuine resume after a reload), we touch nothing — keeping the candidate's
+  // in-progress edits and avoiding re-importing the pristine files over them.
   useEffect(() => {
     if (importedRef.current) return
-    const files = getSession().question?.files
-    if (!files || files.length === 0) return
     importedRef.current = true
-    importQuestionFiles(files, { open: true }).catch((err) => {
+
+    const { sessionId, question } = getSession()
+    const files = question?.files
+
+    const MARKER_KEY = 'jobjen.workspaceOwner'
+    let prevOwner = null
+    try { prevOwner = localStorage.getItem(MARKER_KEY) } catch { /* storage disabled */ }
+
+    // Without a sessionId we can't tell a new session from a resume; fall back to
+    // the plain import (no wipe) rather than risk clobbering an existing one.
+    const isResume = !!sessionId && prevOwner === sessionId
+    if (isResume) return
+
+    const run = async () => {
+      if (sessionId) {
+        try {
+          await resetWorkspace()
+        } catch (err) {
+          console.warn('[assessment] workspace reset failed:', err)
+        }
+        try { localStorage.setItem(MARKER_KEY, sessionId) } catch { /* ignore */ }
+      }
+      if (files && files.length > 0) {
+        await importQuestionFiles(files, { open: true })
+      }
+    }
+
+    run().catch((err) => {
       console.error('[assessment] file import failed:', err)
       setRecWarning((w) => w || 'Some task files could not be loaded into the notebook automatically. Please contact your recruiter if any files are missing.')
     })
   }, [])
 
-  // Start the screen+mic recording once, on mount.
-  useEffect(() => {
-    let cancelled = false
-    // Guard against React StrictMode's double-invoke (dev) starting two recorders.
-    if (recorderRef.current) return
+  // Create a recorder for a screen stream and start it. Shared by the initial
+  // mount and the re-share recovery. onLost fires if the candidate ends the
+  // screen share (browser "Stop sharing" pill) or the recorder dies — we then
+  // block the assessment and force a re-share, never continuing unrecorded.
+  const startRecording = async (screenStream) => {
     const { sessionId } = getSession()
-    const screen = screenStreamRef.current
-    const mic = streamRef.current
-    if (!sessionId || !screen || !mic) return
-
-    const recorder = new ScreenRecorder({ sessionId, screenStream: screen, micStream: mic })
-    recorderRef.current = recorder
-    recorder.start().catch((err) => {
-      if (cancelled) return
-      console.error('[assessment] recording failed to start:', err)
-      setRecWarning('Screen recording could not start. You can still complete and submit the assessment.')
+    if (!sessionId || !screenStream) throw new Error('Missing session or screen stream')
+    const recorder = new ScreenRecorder({
+      sessionId,
+      screenStream,
+      micStream: streamRef.current,
+      onLost: () => setRecordingDown('screen-share-stopped'),
     })
-    return () => { cancelled = true }
-  }, [streamRef, screenStreamRef])
+    recorderRef.current = recorder
+    await recorder.start()
+  }
 
-  // Tab-switch / window-blur detection
+  // Start the screen+mic recording once, on mount. If it can't start, block the
+  // assessment and make the candidate re-share rather than continuing unrecorded.
   useEffect(() => {
-    const onBlur       = () => setTimeout(() => { if (!document.hasFocus()) setBlurred(true) }, 0)
-    const onFocus      = () => setBlurred(false)
-    const onVisibility = () => setBlurred(document.hidden)
+    if (startedRef.current) return // guard React StrictMode double-invoke
+    const { sessionId } = getSession()
+    if (!sessionId || !screenStreamRef.current || !streamRef.current) return
+    startedRef.current = true
+    startRecording(screenStreamRef.current).catch((err) => {
+      console.error('[assessment] recording failed to start:', err)
+      setRecordingDown('start-failed')
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Tab-switch / window-blur detection.
+  //
+  // Armed only once the page has genuinely held focus. Without this the overlay
+  // fires a false positive on first load: the candidate lands here straight from
+  // the screen-share picker, so OS focus is on Chrome's "Stop sharing" bar (not
+  // the page) — `document.hasFocus()` is false — and the JupyterLite iframe
+  // grabbing focus on load fires a parent `blur`, which the detector can't tell
+  // apart from a real tab-switch. The editor then looks blurred until the
+  // candidate clicks it. Gating on `armed` ignores that initial unfocused state
+  // while keeping real tab-switch detection intact once focus has been held.
+  useEffect(() => {
+    armedRef.current = document.hasFocus()
+    const arm = () => { armedRef.current = true; setBlurred(false) }
+    const onBlur       = () => setTimeout(() => { if (armedRef.current && !document.hasFocus()) setBlurred(true) }, 0)
+    const onFocus      = arm
+    const onVisibility = () => { if (armedRef.current) setBlurred(document.hidden) }
     window.addEventListener('blur', onBlur)
     window.addEventListener('focus', onFocus)
     document.addEventListener('visibilitychange', onVisibility)
@@ -88,25 +191,111 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
     }
   }, [])
 
-  const handleSubmit = async () => {
+  // Persist the candidate's chosen AI-panel width across reloads.
+  useEffect(() => {
+    try { localStorage.setItem('jobjen.chatWidth', String(chatWidth)) } catch {}
+  }, [chatWidth])
+
+  // Drag-to-resize the AI panel. A full-screen overlay (rendered while
+  // `resizing`) sits above the JupyterLite iframe so the pointer-move events
+  // keep reaching the parent window — without it, the moment the cursor enters
+  // the iframe the parent stops receiving mousemove and the drag "sticks".
+  useEffect(() => {
+    if (!resizing) return
+    const onMove = (e) => {
+      const clientX = e.touches ? e.touches[0]?.clientX : e.clientX
+      if (clientX == null) return
+      if (e.cancelable) e.preventDefault()
+      setChatWidth(clampChatWidth(window.innerWidth - clientX))
+    }
+    const stop = () => setResizing(false)
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', stop)
+    window.addEventListener('touchmove', onMove, { passive: false })
+    window.addEventListener('touchend', stop)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', stop)
+      window.removeEventListener('touchmove', onMove)
+      window.removeEventListener('touchend', stop)
+    }
+  }, [resizing])
+
+  // Keep the panel width valid if the viewport is resized smaller.
+  useEffect(() => {
+    const onResize = () => setChatWidth((w) => clampChatWidth(w))
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  // Warn before an accidental reload / tab-close while the assessment is still
+  // live, so a misclick (Ctrl-R, closing the tab) doesn't wipe the in-progress
+  // recording + notebook work. Disarmed once submitted (phase === 'done').
+  useEffect(() => {
+    if (phase === 'done') return
+    const onBeforeUnload = (e) => {
+      e.preventDefault()
+      e.returnValue = '' // some browsers require a set returnValue to prompt
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [phase])
+
+  // Re-acquire the entire screen and resume recording after a loss / start
+  // failure. Triggered by a click (getDisplayMedia needs a user gesture).
+  const handleReshare = async () => {
+    if (reSharing) return
+    setReSharing(true)
+    setReshareError('')
+    try {
+      // Disarm the old (dead) recorder so stopping its tracks can't re-fire the
+      // "lost" flow, then acquire a fresh FULL-screen share and resume.
+      recorderRef.current?.dispose?.()
+      const screen = await acquireScreenStream()
+      screenStreamRef.current?.getTracks().forEach((t) => t.stop())
+      screenStreamRef.current = screen
+      await startRecording(screen)
+      setRecordingDown('')
+    } catch (err) {
+      setReshareError(
+        err?.code === 'ENTIRE_SCREEN_REQUIRED'
+          ? 'You must share your ENTIRE screen — not a single tab or window.'
+          : 'Screen sharing was blocked or cancelled. Please allow it to continue.',
+      )
+    } finally {
+      setReSharing(false)
+    }
+  }
+
+  const handleSubmit = async ({ auto = false } = {}) => {
     if (phase === 'submitting') return
-    const ok = window.confirm('Submit your assessment? You will not be able to make further changes.')
-    if (!ok) return
+    // Manual submit needs an active recording + confirmation. An automatic
+    // time-up submit bypasses both — time is up, we submit whatever exists.
+    if (!auto) {
+      if (recordingDown) {
+        setSubmitError('Your screen is not being recorded. Please re-share your entire screen before submitting.')
+        return
+      }
+      const ok = window.confirm('Submit your assessment? You will not be able to make further changes.')
+      if (!ok) return
+    }
 
     const { sessionId } = getSession()
     setPhase('submitting')
     setSubmitError('')
 
-    let durationSec = 0
     // 1. Finalize the recording (best-effort — the backend assembles whatever
-    //    parts landed even if the tail upload fails).
+    //    parts landed even if the tail upload fails). Capture the duration once
+    //    (L4): a retry calls stop() again, which returns 0 on an already-stopped
+    //    recorder; reusing the stored value avoids overwriting it with 0.
     setSubmitStep('recording')
     try {
       const r = await recorderRef.current?.stop()
-      durationSec = r?.durationSec ?? 0
+      if (r?.durationSec) durationRef.current = r.durationSec
     } catch (err) {
       console.error('[assessment] recording finalize failed:', err)
     }
+    const durationSec = durationRef.current
 
     // 2. Export + upload all workspace notebooks (the core deliverable).
     setSubmitStep('notebooks')
@@ -137,6 +326,25 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
     setPhase('done')
   }
 
+  // Time-budget countdown + auto-submit. Recomputed from the SERVER deadline on
+  // every tick, so close/reopen continues correctly (no reset, no pause).
+  // Auto-submits exactly once when the clock hits zero.
+  useEffect(() => {
+    if (!deadlineMs) return // no time limit on this question
+    const tick = () => {
+      const left = Math.max(0, deadlineMs - Date.now())
+      setRemainingMs(left)
+      if (left <= 0 && !autoSubmittedRef.current && phase === 'active') {
+        autoSubmittedRef.current = true
+        handleSubmit({ auto: true })
+      }
+    }
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deadlineMs, phase])
+
   // ── Terminal "submitted" screen ────────────────────────────────────────
   if (phase === 'done') {
     return (
@@ -160,8 +368,22 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
           Technical Round{session.candidateName ? ` — ${session.candidateName}` : ''}
         </span>
         <div className="ml-auto flex items-center gap-2">
+          {deadlineMs ? (
+            <span
+              className={`px-2.5 py-1 rounded-md text-xs font-bold tabular-nums ${
+                remainingMs <= 60000
+                  ? 'bg-red-600 text-white animate-pulse'
+                  : remainingMs <= 5 * 60000
+                    ? 'bg-amber-600 text-white'
+                    : 'bg-jobjen-surface text-jobjen-text border border-jobjen-border'
+              }`}
+              title="Time remaining"
+            >
+              ⏱ {formatRemaining(remainingMs)}
+            </span>
+          ) : null}
           <button
-            onClick={handleSubmit}
+            onClick={() => handleSubmit()}
             disabled={phase === 'submitting'}
             className="jobjen-btn-success px-4 py-1.5 text-xs font-semibold rounded-md disabled:opacity-60"
           >
@@ -184,14 +406,49 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
 
         {/* JupyterLite iframe — fills remaining space */}
         <div className="h-full min-w-0 flex-1">
-          <NotebookFrame onBlur={() => setBlurred(true)} onFocus={() => setBlurred(false)} />
+          <NotebookFrame
+            onBlur={() => { if (armedRef.current) setBlurred(true) }}
+            onFocus={() => { armedRef.current = true; setBlurred(false) }}
+          />
         </div>
 
-        {/* AI chat panel — fixed 300 px */}
+        {/* Drag handle — resize the AI panel */}
         {chatOpen && (
-          <div className="h-full w-[300px] shrink-0 overflow-hidden">
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            title="Drag to resize the assistant"
+            onMouseDown={(e) => { e.preventDefault(); setResizing(true) }}
+            onTouchStart={() => setResizing(true)}
+            onDoubleClick={() => setChatWidth(clampChatWidth(340))}
+            className={`group relative h-full w-1 shrink-0 cursor-col-resize transition-colors ${
+              resizing ? 'bg-jobjen-accent' : 'bg-jobjen-border hover:bg-jobjen-accent'
+            }`}
+          >
+            {/* Wider invisible hit area for easier grabbing */}
+            <div className="absolute inset-y-0 -left-2 -right-2" />
+            {/* Grip dots */}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+              {[0, 1, 2].map((i) => (
+                <span key={i} className="w-0.5 h-0.5 rounded-full bg-white/70" />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* AI chat panel — candidate-resizable */}
+        {chatOpen && (
+          <div
+            className="h-full shrink-0 overflow-hidden"
+            style={{ width: chatWidth }}
+          >
             <ChatPanel onClose={() => setChatOpen(false)} />
           </div>
+        )}
+
+        {/* Resize overlay — captures pointer events over the iframe while dragging */}
+        {resizing && (
+          <div className="fixed inset-0 z-[9990] cursor-col-resize select-none" />
         )}
 
         {/* Reopen button — right edge when chat is closed */}
@@ -225,6 +482,39 @@ export default function AssessmentPage({ streamRef, screenStreamRef }) {
       {submitError && (
         <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[10001] bg-red-800 text-white text-sm font-semibold px-5 py-3 rounded-xl shadow-lg font-sans">
           {submitError}
+        </div>
+      )}
+
+      {/* Recording stopped / failed — BLOCKING. Recording is mandatory, so the
+          candidate cannot continue or submit until they re-share their screen. */}
+      {recordingDown && phase !== 'done' && (
+        <div className="fixed inset-0 z-[10002] bg-black/85 flex flex-col items-center justify-center gap-5 font-sans px-6 text-center">
+          <h2 className="text-[1.5rem] font-bold text-jobjen-text">
+            Screen recording interrupted
+          </h2>
+          <p className="text-sm text-jobjen-muted max-w-[460px] leading-relaxed">
+            Your entire screen must be shared and recorded for the whole
+            assessment.{' '}
+            {recordingDown === 'start-failed'
+              ? 'We could not start the recording.'
+              : recordingDown === 'upload-failed'
+                ? 'Your recording could not be uploaded — please check your internet connection.'
+                : 'The screen share was stopped.'}{' '}
+            Please re-share your <strong>entire screen</strong> to continue —
+            your progress is safe.
+          </p>
+          <button
+            onClick={handleReshare}
+            disabled={reSharing}
+            className="jobjen-btn-success px-6 py-3 text-sm font-semibold rounded-xl disabled:opacity-60"
+          >
+            {reSharing ? 'Waiting for screen share…' : 'Re-share my screen & resume'}
+          </button>
+          {reshareError && (
+            <p className="text-red-400 text-xs max-w-[440px] leading-relaxed">
+              {reshareError}
+            </p>
+          )}
         </div>
       )}
     </div>

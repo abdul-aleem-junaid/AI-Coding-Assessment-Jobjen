@@ -4,9 +4,6 @@
   "installCommand": "node scripts/install-all.mjs",
   "buildCommand": "node scripts/build-all.mjs",
   "outputDirectory": "react-app/dist",
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "https://api.jobjen.com/api/$1" }
-  ],
   "headers": [
     {
       "source": "/(.*)",

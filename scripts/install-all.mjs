@@ -51,7 +51,11 @@ const py = findPython()
 console.log(`Using Python: ${py}`)
 
 // 1. JupyterLite toolchain.
-run(py, ['-m', 'pip', 'install', '-r', 'requirements.txt'])
+// --break-system-packages: Vercel's build-image Python is "externally managed"
+// (PEP 668, managed by uv), which refuses a plain `pip install`. The build
+// container is ephemeral so overriding the marker is safe; the flag is a no-op
+// on a normal local Python (pip >= 23).
+run(py, ['-m', 'pip', 'install', '--break-system-packages', '-r', 'requirements.txt'])
 
 // 2. React app Node deps — `npm ci` when a lockfile exists, else `npm install`.
 const hasLock = existsSync(join(ROOT, 'react-app', 'package-lock.json'))
